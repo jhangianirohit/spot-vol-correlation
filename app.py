@@ -92,8 +92,7 @@ with tab2:
     st.header("Cross-Pair RR Decomposition")
     st.caption(
         "Paste all vols and RRs. Format: pair  tenor  vol(%)  rr(%).  "
-        "USD pairs (EURUSD, USDJPY, etc.) and crosses (EURJPY, EURCNH, etc.). "
-        "RR sign for USDXXX pairs is auto-flipped."
+        "Positive RR = LHS calls over puts. No sign flipping — paste as quoted."
     )
 
     default_cross = """# USD pairs

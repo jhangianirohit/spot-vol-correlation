@@ -9,7 +9,7 @@ import pandas as pd
 
 from spotvol.models import TenorInput
 from spotvol.implied_beta import compute_implied_beta
-from spotvol.cross_pairs import parse_vol_file, decompose_cross, CROSS_LEGS, normalize_pair
+from spotvol.cross_pairs import parse_vol_file, decompose_cross, CROSS_LEGS
 
 st.set_page_config(page_title="Spot-Vol Beta", layout="wide")
 

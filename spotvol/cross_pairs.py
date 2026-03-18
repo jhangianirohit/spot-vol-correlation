@@ -1,7 +1,15 @@
 """
 Cross-pair RR decomposition.
 
-Given USD pair vols and RRs, predict cross-pair RRs and compare to market.
+Convention: RR is always from LHS currency perspective.
+  Positive RR = LHS calls over LHS puts (vol up when LHS strengthens)
+  Negative RR = LHS puts over LHS calls (vol up when LHS weakens)
+
+Cross = leg1 × leg2 when second leg is USDXXX
+Cross = leg1 / leg2 when second leg is XXXUSD
+
+Example: EURCNH = EURUSD × USDCNH  (sign = +1)
+         EURGBP = EURUSD / GBPUSD  (sign = -1)
 """
 
 import numpy as np
@@ -11,50 +19,50 @@ from spotvol.implied_beta import compute_implied_beta, compute_fair_rr
 from spotvol.tenors import tenor_to_T
 
 
-# Standard cross → USD leg mapping
-# Cross = leg1 / leg2 (both vs USD)
-# e.g., EURCNH: EURUSD / CNHUSD, so leg1=EURUSD, leg2=CNHUSD
+# Cross → (leg1, leg2, sign)
+# sign = +1: cross = leg1 × leg2,  d(cross) = d(leg1) + d(leg2)
+# sign = -1: cross = leg1 / leg2,  d(cross) = d(leg1) - d(leg2)
 CROSS_LEGS = {
-    "EURJPY":  ("EURUSD", "JPYUSD"),
-    "EURGBP":  ("EURUSD", "GBPUSD"),
-    "EURCHF":  ("EURUSD", "CHFUSD"),
-    "EURCNH":  ("EURUSD", "CNHUSD"),
-    "EURAUD":  ("EURUSD", "AUDUSD"),
-    "EURNOK":  ("EURUSD", "NOKUSD"),
-    "EURSEK":  ("EURUSD", "SEKUSD"),
-    "GBPJPY":  ("GBPUSD", "JPYUSD"),
-    "GBPCHF":  ("GBPUSD", "CHFUSD"),
-    "AUDJPY":  ("AUDUSD", "JPYUSD"),
-    "AUDNZD":  ("AUDUSD", "NZDUSD"),
-    "AUDSGD":  ("AUDUSD", "SGDUSD"),
-    "AUDCNH":  ("AUDUSD", "CNHUSD"),
-    "NZDJPY":  ("NZDUSD", "JPYUSD"),
-    "CADJPY":  ("CADUSD", "JPYUSD"),
-    "CADCHF":  ("CADUSD", "CHFUSD"),
-    "NOKJPY":  ("NOKUSD", "JPYUSD"),
-    "NOKSEK":  ("NOKUSD", "SEKUSD"),
-    "CHFJPY":  ("CHFUSD", "JPYUSD"),
-    "SGDJPY":  ("SGDUSD", "JPYUSD"),
-    "CNHJPY":  ("CNHUSD", "JPYUSD"),
-}
-
-# For pairs quoted as USDXXX, the XXX vs USD pair is inverted
-# e.g., USDJPY: we need JPYUSD vol. JPYUSD vol = USDJPY vol (symmetric).
-# The RR sign flips: JPYUSD RR = -USDJPY RR
-# We handle this by allowing input as USDXXX and converting internally.
-USD_PAIR_ALIASES = {
-    "USDJPY": ("JPYUSD", -1),   # JPYUSD vol = USDJPY vol, RR sign flips
-    "USDCHF": ("CHFUSD", -1),
-    "USDCNH": ("CNHUSD", -1),
-    "USDSGD": ("SGDUSD", -1),
-    "USDNOK": ("NOKUSD", -1),
-    "USDSEK": ("SEKUSD", -1),
-    "USDCAD": ("CADUSD", -1),
-    # These are already quoted as XXXUSD
-    "EURUSD": ("EURUSD", 1),
-    "GBPUSD": ("GBPUSD", 1),
-    "AUDUSD": ("AUDUSD", 1),
-    "NZDUSD": ("NZDUSD", 1),
+    # EUR crosses
+    "EURJPY":  ("EURUSD", "USDJPY",  +1),
+    "EURCHF":  ("EURUSD", "USDCHF",  +1),
+    "EURCNH":  ("EURUSD", "USDCNH",  +1),
+    "EURGBP":  ("EURUSD", "GBPUSD",  -1),
+    "EURAUD":  ("EURUSD", "AUDUSD",  -1),
+    "EURNZD":  ("EURUSD", "NZDUSD",  -1),
+    "EURNOK":  ("EURUSD", "USDNOK",  +1),
+    "EURSEK":  ("EURUSD", "USDSEK",  +1),
+    "EURCAD":  ("EURUSD", "USDCAD",  +1),
+    "EURSGD":  ("EURUSD", "USDSGD",  +1),
+    # GBP crosses
+    "GBPJPY":  ("GBPUSD", "USDJPY",  +1),
+    "GBPCHF":  ("GBPUSD", "USDCHF",  +1),
+    "GBPCNH":  ("GBPUSD", "USDCNH",  +1),
+    "GBPAUD":  ("GBPUSD", "AUDUSD",  -1),
+    "GBPNZD":  ("GBPUSD", "NZDUSD",  -1),
+    "GBPCAD":  ("GBPUSD", "USDCAD",  +1),
+    # AUD crosses
+    "AUDJPY":  ("AUDUSD", "USDJPY",  +1),
+    "AUDCHF":  ("AUDUSD", "USDCHF",  +1),
+    "AUDCNH":  ("AUDUSD", "USDCNH",  +1),
+    "AUDNZD":  ("AUDUSD", "NZDUSD",  -1),
+    "AUDSGD":  ("AUDUSD", "USDSGD",  +1),
+    "AUDCAD":  ("AUDUSD", "USDCAD",  +1),
+    # NZD crosses
+    "NZDJPY":  ("NZDUSD", "USDJPY",  +1),
+    "NZDCHF":  ("NZDUSD", "USDCHF",  +1),
+    "NZDCAD":  ("NZDUSD", "USDCAD",  +1),
+    # CAD crosses
+    "CADJPY":  ("USDCAD", "USDJPY",  -1),  # CADJPY = USDJPY / USDCAD
+    "CADCHF":  ("USDCAD", "USDCHF",  -1),  # CADCHF = USDCHF / USDCAD
+    # NOK/SEK
+    "NOKSEK":  ("USDNOK", "USDSEK",  -1),  # NOKSEK = USDSEK / USDNOK
+    # CHF
+    "CHFJPY":  ("USDCHF", "USDJPY",  -1),  # CHFJPY = USDJPY / USDCHF
+    # SGD
+    "SGDJPY":  ("USDSGD", "USDJPY",  -1),  # SGDJPY = USDJPY / USDSGD
+    # CNH
+    "CNHJPY":  ("USDCNH", "USDJPY",  -1),  # CNHJPY = USDJPY / USDCNH
 }
 
 
@@ -64,7 +72,8 @@ class CrossResult:
     tenor: str
     leg1: str
     leg2: str
-    rho: float
+    sign: int          # +1 or -1
+    rho: float         # implied correlation between leg1 and leg2 returns
     beta_leg1: float
     beta_leg2: float
     vol_w_leg1: float
@@ -72,35 +81,22 @@ class CrossResult:
     spot_w_leg1: float
     spot_w_leg2: float
     beta_cross: float
-    predicted_rr: float  # in decimal
-    market_rr: float | None  # in decimal, None if not provided
-    residual: float | None  # market - predicted, in decimal
-
-
-def normalize_pair(pair: str) -> tuple[str, float, float]:
-    """Convert any USD pair to XXXUSD convention.
-    Returns (normalized_name, vol_multiplier, rr_multiplier).
-    vol is always positive so multiplier is always 1.
-    RR sign flips for USDXXX pairs.
-    """
-    pair = pair.upper()
-    if pair in USD_PAIR_ALIASES:
-        name, rr_sign = USD_PAIR_ALIASES[pair]
-        return name, 1.0, float(rr_sign)
-    # Already in XXXUSD form or unknown
-    return pair, 1.0, 1.0
+    predicted_rr: float
+    market_rr: float | None
+    residual: float | None
 
 
 def decompose_cross(
     cross: str,
     tenor: str,
-    vol_data: dict,  # {pair: {tenor: (vol, rr)}}
-    spot_approx: float = 1.0,  # approximate spot for strike finding (doesn't affect beta much)
+    vol_data: dict,
+    spot_approx: float = 1.0,
 ) -> CrossResult | None:
-    """Decompose a single cross pair at a single tenor.
+    """Decompose a cross pair RR into USD pair components.
 
-    vol_data should have entries for both USD legs and the cross itself.
-    Vols and RRs in decimal (e.g., 0.075 for 7.5%, -0.01 for -1.0%).
+    vol_data: {pair: {tenor: (vol_decimal, rr_decimal)}}
+    Pairs are in market quoting convention (EURUSD, USDCNH, etc.).
+    RR follows LHS convention (positive = LHS calls over puts).
     """
     cross = cross.upper()
     tenor = tenor.upper()
@@ -108,43 +104,47 @@ def decompose_cross(
     if cross not in CROSS_LEGS:
         return None
 
-    leg1_name, leg2_name = CROSS_LEGS[cross]
+    leg1, leg2, sign = CROSS_LEGS[cross]
 
-    # Get data for each leg and the cross
-    if leg1_name not in vol_data or tenor not in vol_data[leg1_name]:
+    if leg1 not in vol_data or tenor not in vol_data[leg1]:
         return None
-    if leg2_name not in vol_data or tenor not in vol_data[leg2_name]:
+    if leg2 not in vol_data or tenor not in vol_data[leg2]:
         return None
     if cross not in vol_data or tenor not in vol_data[cross]:
         return None
 
-    sigma1, rr1 = vol_data[leg1_name][tenor]
-    sigma2, rr2 = vol_data[leg2_name][tenor]
+    sigma1, rr1 = vol_data[leg1][tenor]
+    sigma2, rr2 = vol_data[leg2][tenor]
     sigma_cross, rr_cross_market = vol_data[cross][tenor]
 
     T = tenor_to_T(tenor)
+    var_cross = sigma_cross ** 2
 
-    # Implied correlation
-    rho_num = sigma1**2 + sigma2**2 - sigma_cross**2
-    rho_den = 2 * sigma1 * sigma2
+    # Implied correlation between leg1 and leg2 returns
+    # σ²(cross) = σ²₁ + σ²₂ + 2s×ρ×σ₁×σ₂
+    # ρ = (σ²_cross - σ²₁ - σ²₂) / (2s×σ₁×σ₂)
+    rho_num = sigma_cross**2 - sigma1**2 - sigma2**2
+    rho_den = 2 * sign * sigma1 * sigma2
     if rho_den == 0:
         return None
     rho = rho_num / rho_den
-    rho = max(-1.0, min(1.0, rho))  # clamp
+    rho = max(-1.0, min(1.0, rho))
 
-    var_cross = sigma_cross**2
-
-    # Implied betas of USD legs
+    # Implied betas of each leg (in their own quoting convention)
     r1 = compute_implied_beta(spot_approx, [TenorInput(tenor, sigma1, rr1)])[0]
     r2 = compute_implied_beta(spot_approx, [TenorInput(tenor, sigma2, rr2)])[0]
 
-    # Vol weights
-    vol_w1 = (sigma1 - rho * sigma2) / sigma_cross
-    vol_w2 = (sigma2 - rho * sigma1) / sigma_cross
+    # Vol sensitivities: ∂σ_cross/∂σ_leg
+    # ∂σ/∂σ₁ = (σ₁ + s×ρ×σ₂) / σ_cross
+    # ∂σ/∂σ₂ = (σ₂ + s×ρ×σ₁) / σ_cross
+    vol_w1 = (sigma1 + sign * rho * sigma2) / sigma_cross
+    vol_w2 = (sigma2 + sign * rho * sigma1) / sigma_cross
 
-    # Spot weights
-    spot_w1 = (sigma1**2 - rho * sigma1 * sigma2) / var_cross
-    spot_w2 = (rho * sigma1 * sigma2 - sigma2**2) / var_cross
+    # Spot decomposition: when cross moves 1%, expected leg moves
+    # Cov(leg1, cross) = σ²₁ + s×ρ×σ₁×σ₂
+    # Cov(leg2, cross) = ρ×σ₁×σ₂ + s×σ²₂
+    spot_w1 = (sigma1**2 + sign * rho * sigma1 * sigma2) / var_cross
+    spot_w2 = (rho * sigma1 * sigma2 + sign * sigma2**2) / var_cross
 
     # Cross beta
     beta_cross = vol_w1 * r1.beta * spot_w1 + vol_w2 * r2.beta * spot_w2
@@ -152,23 +152,16 @@ def decompose_cross(
     # Predicted RR
     predicted_rr = compute_fair_rr(spot_approx, tenor, sigma_cross, beta_cross)
 
-    # Residual
     residual = None
     if rr_cross_market is not None:
         residual = rr_cross_market - predicted_rr
 
     return CrossResult(
-        cross=cross,
-        tenor=tenor,
-        leg1=leg1_name,
-        leg2=leg2_name,
+        cross=cross, tenor=tenor, leg1=leg1, leg2=leg2, sign=sign,
         rho=rho,
-        beta_leg1=r1.beta,
-        beta_leg2=r2.beta,
-        vol_w_leg1=vol_w1,
-        vol_w_leg2=vol_w2,
-        spot_w_leg1=spot_w1,
-        spot_w_leg2=spot_w2,
+        beta_leg1=r1.beta, beta_leg2=r2.beta,
+        vol_w_leg1=vol_w1, vol_w_leg2=vol_w2,
+        spot_w_leg1=spot_w1, spot_w_leg2=spot_w2,
         beta_cross=beta_cross,
         predicted_rr=predicted_rr,
         market_rr=rr_cross_market,
@@ -177,9 +170,9 @@ def decompose_cross(
 
 
 def parse_vol_file(text: str) -> dict:
-    """Parse a vol/RR data file into vol_data dict.
+    """Parse a vol/RR data file.
 
-    Expected format (tab/space/comma separated):
+    Format (tab/space/comma separated):
       pair  tenor  vol(%)  rr(%)
 
     e.g.:
@@ -187,9 +180,10 @@ def parse_vol_file(text: str) -> dict:
       USDCNH  1M  3.55  -0.25
       EURCNH  1M  6.38  -0.65
 
-    For USDXXX pairs, the RR sign is automatically flipped to XXXUSD convention.
+    No sign flipping. Everything in natural market convention.
+    RR follows LHS convention: positive = LHS calls over puts.
 
-    Returns: {normalized_pair: {tenor: (vol_decimal, rr_decimal)}}
+    Returns: {pair: {tenor: (vol_decimal, rr_decimal)}}
     """
     vol_data = {}
 
@@ -209,17 +203,8 @@ def parse_vol_file(text: str) -> dict:
         except (ValueError, IndexError):
             continue
 
-        # Normalize to XXXUSD
-        norm_pair, vol_mult, rr_mult = normalize_pair(pair)
-
-        # For crosses, keep as-is
-        if pair in CROSS_LEGS:
-            norm_pair = pair
-            rr_mult = 1.0
-
-        if norm_pair not in vol_data:
-            vol_data[norm_pair] = {}
-
-        vol_data[norm_pair][tenor] = (vol * vol_mult, rr * rr_mult if rr is not None else None)
+        if pair not in vol_data:
+            vol_data[pair] = {}
+        vol_data[pair][tenor] = (vol, rr)
 
     return vol_data

@@ -482,16 +482,35 @@ function fmtSigned(v, dp=2) {
     return (v >= 0 ? '+' : '') + v.toFixed(dp);
 }
 
-function colorClass(v) {
-    if (v == null || isNaN(v)) return '';
-    if (v > 0.005) return 'val-pos';
-    if (v < -0.005) return 'val-neg';
-    return '';
+// Intensity-based color: deeper color for larger absolute values
+// Returns an inline style string with color and optional background
+function intensityColor(v, maxAbs=null) {
+    if (v == null || isNaN(v) || Math.abs(v) < 0.005) return 'color: var(--text-secondary);';
+    // Clamp intensity 0-1
+    const cap = maxAbs || 3.0; // default scale: ±3 is fully saturated
+    const intensity = Math.min(Math.abs(v) / cap, 1.0);
+    if (v > 0) {
+        // Green spectrum: from dim to bright
+        const r = Math.round(34 + (1 - intensity) * 60);
+        const g = Math.round(120 + intensity * 77);
+        const b = Math.round(50 + (1 - intensity) * 44);
+        const bg = `rgba(34, 197, 94, ${intensity * 0.12})`;
+        return `color: rgb(${r},${g},${b}); background: ${bg};`;
+    } else {
+        // Red spectrum: from dim to bright
+        const r = Math.round(180 + intensity * 59);
+        const g = Math.round(100 - intensity * 60);
+        const b = Math.round(80 - intensity * 36);
+        const bg = `rgba(239, 68, 68, ${intensity * 0.12})`;
+        return `color: rgb(${r},${g},${b}); background: ${bg};`;
+    }
 }
 
-function td(val, colored=false) {
-    const cls = colored ? colorClass(parseFloat(String(val).replace('+',''))) : '';
-    return `<td class="${cls}">${val}</td>`;
+function td(val, colored=false, maxAbs=null) {
+    if (!colored) return `<td>${val}</td>`;
+    const num = parseFloat(String(val).replace('+', ''));
+    const style = intensityColor(num, maxAbs);
+    return `<td style="${style}">${val}</td>`;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -524,13 +543,17 @@ function computeSingle() {
     ['Tenor','Vol %','RR %','Beta','RR/ATM'].forEach(h => html += `<th>${h}</th>`);
     html += '</tr></thead><tbody>';
 
+    // Find max absolute beta for scaling
+    const maxBeta = Math.max(...results.map(r => Math.abs(r.beta)), 1);
+    const maxRR = Math.max(...results.map(r => Math.abs(r.rr)), 0.5);
+
     results.forEach(r => {
         html += '<tr>';
         html += `<td>${r.tenor}</td>`;
         html += `<td>${r.vol.toFixed(2)}</td>`;
-        html += td(fmtSigned(r.rr), true);
-        html += td(fmtSigned(r.beta), true);
-        html += td(fmtSigned(r.rrAtm, 3), true);
+        html += td(fmtSigned(r.rr), true, maxRR);
+        html += td(fmtSigned(r.beta), true, maxBeta);
+        html += td(fmtSigned(r.rrAtm, 3), true, 0.3);
         html += '</tr>';
     });
 
@@ -572,14 +595,20 @@ function computeCross() {
             const beta = impliedBeta(d.vol, d.rr, tenor);
             if (beta == null) return;
             betaRows.push({ pair, tenor, vol: d.vol, rr: d.rr, beta, rrAtm: d.rr / d.vol });
-            html += '<tr>';
-            html += `<td>${pair}</td><td>${tenor}</td>`;
-            html += `<td>${d.vol.toFixed(2)}</td>`;
-            html += td(fmtSigned(d.rr), true);
-            html += td(fmtSigned(beta), true);
-            html += td(fmtSigned(d.rr / d.vol, 3), true);
-            html += '</tr>';
         });
+    });
+
+    const maxBetaUSD = Math.max(...betaRows.map(r => Math.abs(r.beta)), 1);
+    const maxRRUSD = Math.max(...betaRows.map(r => Math.abs(r.rr)), 0.5);
+
+    betaRows.forEach(r => {
+        html += '<tr>';
+        html += `<td>${r.pair}</td><td>${r.tenor}</td>`;
+        html += `<td>${r.vol.toFixed(2)}</td>`;
+        html += td(fmtSigned(r.rr), true, maxRRUSD);
+        html += td(fmtSigned(r.beta), true, maxBetaUSD);
+        html += td(fmtSigned(r.rrAtm, 3), true, 0.3);
+        html += '</tr>';
     });
     html += '</tbody></table></div>';
 
@@ -637,15 +666,53 @@ function computeCross() {
             html += `<td>${cross}</td><td>${tenor}</td>`;
             html += `<td>${leg1} / ${leg2}</td>`;
             html += `<td>${rho.toFixed(2)}</td>`;
-            html += td(fmtSigned(betaCross), true);
-            html += td(fmtSigned(predRR), true);
-            html += td(mktRR != null ? fmtSigned(mktRR) : '—', true);
-            html += td(residual != null ? fmtSigned(residual) : '—', true);
+            html += td(fmtSigned(betaCross), true, 3);
+            html += td(fmtSigned(predRR), true, 2);
+            html += td(mktRR != null ? fmtSigned(mktRR) : '—', true, 2);
+            html += td(residual != null ? fmtSigned(residual) : '—', true, 0.5);
             html += '</tr>';
         });
     });
 
     html += '</tbody></table></div>';
+
+    // ── Residual heatmap matrix: Cross × Tenor ──
+    if (crossResults.length > 0) {
+        const crossNames = [...new Set(crossResults.map(r => r.cross))];
+        const crossTenors = sortTenors([...new Set(crossResults.map(r => r.tenor))]);
+        const resMap = {};
+        let maxRes = 0;
+        crossResults.forEach(r => {
+            if (r.residual != null) {
+                const key = r.cross + '|' + r.tenor;
+                resMap[key] = r.residual;
+                maxRes = Math.max(maxRes, Math.abs(r.residual));
+            }
+        });
+        if (maxRes < 0.01) maxRes = 0.5; // minimum scale
+
+        html += '<div class="card"><div class="section-title">Residual Heatmap (Market − Predicted RR%)</div>';
+        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Positive (green) = cross RR cheap vs model · Negative (red) = rich</div>';
+        html += '<table class="data-table"><thead><tr><th>Cross</th>';
+        crossTenors.forEach(t => html += `<th>${t}</th>`);
+        html += '</tr></thead><tbody>';
+
+        crossNames.forEach(cross => {
+            html += '<tr>';
+            html += `<td>${cross}</td>`;
+            crossTenors.forEach(tenor => {
+                const key = cross + '|' + tenor;
+                const v = resMap[key];
+                if (v != null) {
+                    html += td(fmtSigned(v), true, maxRes);
+                } else {
+                    html += '<td style="color:var(--text-muted);">—</td>';
+                }
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+    }
 
     document.getElementById('cross-results').innerHTML = html;
     lastCrossResults = { betaRows, crossResults };
@@ -679,10 +746,10 @@ function copyEmailReport() {
         h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.pair}</td>`;
         h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.tenor}</td>`;
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.vol.toFixed(2)}</td>`;
-        const rrCol = r.rr < 0 ? '#ef4444' : r.rr > 0 ? '#22c55e' : '#1f2937';
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${rrCol};">${fmtSigned(r.rr)}</td>`;
-        const bCol = r.beta < 0 ? '#ef4444' : r.beta > 0 ? '#22c55e' : '#1f2937';
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bCol};">${fmtSigned(r.beta)}</td>`;
+        const rrC = emailColor(r.rr, 2);
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${rrC.color}; background: ${rrC.bg};">${fmtSigned(r.rr)}</td>`;
+        const bC = emailColor(r.beta, 3);
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bC.color}; background: ${bC.bg};">${fmtSigned(r.beta)}</td>`;
         h += `</tr>`;
     });
     h += `</table>`;
@@ -700,18 +767,37 @@ function copyEmailReport() {
         h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.cross}</td>`;
         h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.tenor}</td>`;
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.rho.toFixed(2)}</td>`;
-        const bcCol = r.betaCross < 0 ? '#ef4444' : '#22c55e';
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bcCol};">${fmtSigned(r.betaCross)}</td>`;
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${fmtSigned(r.predRR)}</td>`;
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.mktRR != null ? fmtSigned(r.mktRR) : '—'}</td>`;
-        const resCol = r.residual > 0 ? '#22c55e' : r.residual < 0 ? '#ef4444' : '#1f2937';
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${resCol};">${r.residual != null ? fmtSigned(r.residual) : '—'}</td>`;
+        const bcC = emailColor(r.betaCross, 3);
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bcC.color}; background: ${bcC.bg};">${fmtSigned(r.betaCross)}</td>`;
+        const prC = emailColor(r.predRR, 2);
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${prC.color}; background: ${prC.bg};">${fmtSigned(r.predRR)}</td>`;
+        const mkC = emailColor(r.mktRR, 2);
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${mkC.color}; background: ${mkC.bg};">${r.mktRR != null ? fmtSigned(r.mktRR) : '—'}</td>`;
+        const rsC = emailColor(r.residual, 0.5);
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${rsC.color}; background: ${rsC.bg};">${r.residual != null ? fmtSigned(r.residual) : '—'}</td>`;
         h += `</tr>`;
     });
     h += `</table>`;
 
     h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">Beta = vol pts per 1% spot · SF=0.5 · Calendar days · Analytical Greeks</p>`;
     h += `</div>`;
+
+    // Email intensity color (light theme version)
+    function emailColor(v, maxAbs=2) {
+        if (v == null || isNaN(v) || Math.abs(v) < 0.005) return { color: '#6b7280', bg: '#ffffff' };
+        const intensity = Math.min(Math.abs(v) / maxAbs, 1.0);
+        if (v > 0) {
+            const r = Math.round(240 - intensity * 80);
+            const g = Math.round(255 - intensity * 20);
+            const b = Math.round(240 - intensity * 80);
+            return { color: '#166534', bg: `rgb(${r},${g},${b})` };
+        } else {
+            const r = Math.round(255 - intensity * 10);
+            const g = Math.round(240 - intensity * 80);
+            const b = Math.round(240 - intensity * 80);
+            return { color: '#991b1b', bg: `rgb(${r},${g},${b})` };
+        }
+    }
 
     // Copy as HTML
     try {

@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spot-Vol Beta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg-main: #0d1117;
+    --bg-elevated: #151b23;
+    --bg-input: #1c2333;
+    --text-primary: #e5e5e5;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --cyan: #06b6d4;
+    --cyan-dim: rgba(6, 182, 212, 0.3);
+    --cyan-glow: rgba(6, 182, 212, 0.15);
+    --green: #22c55e;
+    --red: #ef4444;
+    --border: #21262d;
+    --border-strong: #30363d;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--bg-main);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+    animation: fadeIn 0.4s ease-in;
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.app-header {
+    padding: 20px 24px 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.app-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--cyan);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.app-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    letter-spacing: 0.04em;
+}
+
+/* Tabs */
+.tab-nav {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+}
+
+.tab-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.tab-btn:hover { color: var(--text-primary); }
+.tab-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+.tab-panel { display: none; padding: 20px 24px; max-width: 1800px; }
+.tab-panel.active { display: block; animation: fadeIn 0.3s ease; }
+
+/* Container */
+.container { max-width: 1800px; }
+
+/* Cards */
+.card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.card:hover { border-color: var(--border-strong); }
+
+/* Section headers */
+.section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Inputs */
+.input-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: flex-end;
+}
+
+.input-group { display: flex; flex-direction: column; gap: 4px; }
+
+.input-group label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.input-group input, .input-group select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 3px;
+    outline: none;
+    width: 140px;
+}
+
+.input-group input:focus {
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 2px var(--cyan-dim);
+}
+
+textarea.data-input {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 10px 12px;
+    border-radius: 3px;
+    outline: none;
+    width: 100%;
+    resize: vertical;
+    tab-size: 8;
+}
+
+textarea.data-input:focus {
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 2px var(--cyan-dim);
+}
+
+/* Buttons */
+.btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 7px 16px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid var(--cyan);
+    background: transparent;
+    color: var(--cyan);
+}
+
+.btn:hover { background: var(--cyan); color: #000; }
+.btn:active { background: #0891b2; }
+
+.btn-row { display: flex; gap: 8px; margin: 12px 0; }
+
+/* Tables */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    margin: 8px 0;
+}
+
+.data-table th {
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: 8px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border-strong);
+    position: sticky;
+    top: 0;
+}
+
+.data-table th:first-child, .data-table th:nth-child(2) { text-align: left; }
+
+.data-table td {
+    padding: 5px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.data-table td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
+.data-table td:nth-child(2) { text-align: left; }
+
+.data-table tr:hover td { background: var(--cyan-glow); }
+
+.val-pos { color: var(--green); }
+.val-neg { color: var(--red); }
+
+/* Layout */
+.two-col {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 20px;
+}
+
+/* Status message */
+.status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 8px 12px;
+    border-radius: 3px;
+    margin: 8px 0;
+    animation: fadeIn 0.2s ease;
+}
+
+.status-success { background: rgba(34, 197, 94, 0.1); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.2); }
+.status-error { background: rgba(239, 68, 68, 0.1); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.2); }
+
+/* Footer */
+.footer {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    letter-spacing: 0.04em;
+    margin-top: 24px;
+}
+
+/* Summary bar */
+.summary-bar {
+    display: flex;
+    gap: 24px;
+    margin: 12px 0;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cyan);
+    border-radius: 4px;
+}
+
+.summary-item { text-align: center; }
+
+.summary-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.summary-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: 2px;
+}
+</style>
+</head>
+<body>
+
+<div class="app-header">
+    <div class="app-title">Spot-Vol Correlation</div>
+    <div class="app-subtitle">Implied beta extraction &amp; cross-pair RR decomposition</div>
+</div>
+
+<div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('single')">Single Pair</button>
+    <button class="tab-btn" onclick="switchTab('cross')">Cross Decomposition</button>
+</div>
+
+<!-- ═══════════ TAB 1: SINGLE PAIR ═══════════ -->
+<div id="tab-single" class="tab-panel active">
+    <div class="two-col">
+        <div>
+            <div class="card">
+                <div class="section-title">Market Data</div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Pair</label>
+                        <input id="single-pair" value="EURUSD">
+                    </div>
+                </div>
+                <div style="margin-bottom:6px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;">
+                    Tenor &nbsp; Vol(%) &nbsp; RR(%)
+                </div>
+                <textarea id="single-data" class="data-input" rows="12">ON	11.88	-2.67
+1W	9.03	-1.63
+2W	8.24	-1.47
+3W	7.88	-1.35
+1M	7.70	-1.26
+2M	7.46	1.02
+3M	7.30	-0.81
+6M	7.17	-0.34
+9M	7.16	-0.08
+1Y	7.12	0.15</textarea>
+                <div class="btn-row">
+                    <button class="btn" onclick="computeSingle()">Calculate</button>
+                </div>
+            </div>
+        </div>
+        <div>
+            <div id="single-results"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════ TAB 2: CROSS DECOMPOSITION ═══════════ -->
+<div id="tab-cross" class="tab-panel">
+    <div class="two-col">
+        <div>
+            <div class="card">
+                <div class="section-title">All Vols &amp; RRs</div>
+                <div style="margin-bottom:6px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.04em;">
+                    Positive RR = LHS calls over puts · Paste as quoted
+                </div>
+                <textarea id="cross-data" class="data-input" rows="24"># USD PAIRS
+EURUSD	ON	11.88	-2.67
+EURUSD	1W	9.03	-1.63
+EURUSD	1M	7.53	-1.03
+EURUSD	3M	7.25	-0.66
+USDCNH	1M	3.55	-0.25
+USDCNH	3M	3.58	-0.30
+USDJPY	1M	10.20	0.85
+USDJPY	3M	9.80	0.60
+GBPUSD	1M	7.10	-0.90
+GBPUSD	3M	6.90	-0.55
+AUDUSD	1M	10.50	-1.40
+AUDUSD	3M	10.20	-1.10
+# CROSSES
+EURCNH	1M	6.38	-0.65
+EURCNH	3M	6.27	-0.33
+EURJPY	1M	10.80	-0.45
+EURJPY	3M	10.50	-0.30
+EURGBP	1M	5.20	-0.25
+EURGBP	3M	5.00	-0.15</textarea>
+                <div class="btn-row">
+                    <button class="btn" onclick="computeCross()">Calculate</button>
+                    <button class="btn" onclick="copyEmailReport()">Copy Email Report</button>
+                </div>
+                <div id="cross-status"></div>
+            </div>
+        </div>
+        <div>
+            <div id="cross-results"></div>
+        </div>
+    </div>
+</div>
+
+<div class="footer">
+    Beta = vol pts per 1% spot move · β ≈ 1.48 × RR / (ATM × √T) · SF=0.5 · Analytical Greeks · Calendar days
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────
+
+const TENOR_DAYS = {
+    'ON':1,'1D':1,'1W':7,'2W':14,'3W':21,'1M':30,'2M':60,
+    '3M':91,'6M':182,'9M':274,'1Y':365,'2Y':730
+};
+const TENOR_ORDER = ['ON','1D','1W','2W','3W','1M','2M','3M','6M','9M','1Y','2Y'];
+const TENOR_RANK = {};
+TENOR_ORDER.forEach((t,i) => TENOR_RANK[t] = i);
+
+const BETA_CONST = 1.4826; // 1 / (2 * 0.5 * 0.6745)
+
+// Cross definitions: [leg1, leg2, sign]
+// sign=+1: cross = leg1 × leg2, sign=-1: cross = leg1 / leg2
+const CROSS_LEGS = {
+    'EURJPY':['EURUSD','USDJPY',1],'EURCHF':['EURUSD','USDCHF',1],
+    'EURCNH':['EURUSD','USDCNH',1],'EURGBP':['EURUSD','GBPUSD',-1],
+    'EURAUD':['EURUSD','AUDUSD',-1],'EURNZD':['EURUSD','NZDUSD',-1],
+    'EURNOK':['EURUSD','USDNOK',1],'EURSEK':['EURUSD','USDSEK',1],
+    'EURCAD':['EURUSD','USDCAD',1],'EURSGD':['EURUSD','USDSGD',1],
+    'GBPJPY':['GBPUSD','USDJPY',1],'GBPCHF':['GBPUSD','USDCHF',1],
+    'GBPCNH':['GBPUSD','USDCNH',1],'GBPAUD':['GBPUSD','AUDUSD',-1],
+    'GBPNZD':['GBPUSD','NZDUSD',-1],'GBPCAD':['GBPUSD','USDCAD',1],
+    'AUDJPY':['AUDUSD','USDJPY',1],'AUDCHF':['AUDUSD','USDCHF',1],
+    'AUDCNH':['AUDUSD','USDCNH',1],'AUDNZD':['AUDUSD','NZDUSD',-1],
+    'AUDSGD':['AUDUSD','USDSGD',1],'AUDCAD':['AUDUSD','USDCAD',1],
+    'NZDJPY':['NZDUSD','USDJPY',1],'NZDCHF':['NZDUSD','USDCHF',1],
+    'NZDCAD':['NZDUSD','USDCAD',1],
+    'CADJPY':['USDCAD','USDJPY',-1],'CADCHF':['USDCAD','USDCHF',-1],
+    'CHFJPY':['USDCHF','USDJPY',-1],'SGDJPY':['USDSGD','USDJPY',-1],
+    'CNHJPY':['USDCNH','USDJPY',-1],
+    'NOKSEK':['USDNOK','USDSEK',-1],
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Core math
+// ─────────────────────────────────────────────────────────────────
+
+function tenorToT(tenor) {
+    const d = TENOR_DAYS[tenor.toUpperCase()];
+    return d ? d / 365 : null;
+}
+
+function impliedBeta(vol, rr, tenor) {
+    // vol and rr in % (e.g., 7.5, -1.03)
+    // returns beta in vol pts per 1% spot
+    const T = tenorToT(tenor);
+    if (!T || vol === 0) return null;
+    return BETA_CONST * rr / (vol * Math.sqrt(T));
+}
+
+function fairRR(beta, vol, tenor) {
+    // inverse: beta → RR in %
+    const T = tenorToT(tenor);
+    if (!T) return null;
+    return beta * vol * Math.sqrt(T) / BETA_CONST;
+}
+
+function sortTenors(arr) {
+    return arr.sort((a, b) => (TENOR_RANK[a] || 999) - (TENOR_RANK[b] || 999));
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Parsing
+// ─────────────────────────────────────────────────────────────────
+
+function parseData(text) {
+    // Returns: { pair: { tenor: { vol, rr } } }
+    const data = {};
+    text.split('\n').forEach(line => {
+        line = line.trim();
+        if (!line || line.startsWith('#')) return;
+        const parts = line.replace(/,/g, ' ').replace(/\t/g, ' ').split(/\s+/);
+        if (parts.length < 3) return;
+        const pair = parts[0].toUpperCase();
+        const tenor = parts[1].toUpperCase();
+        const vol = parseFloat(parts[2]);
+        const rr = parts.length >= 4 ? parseFloat(parts[3]) : null;
+        if (isNaN(vol)) return;
+        if (!data[pair]) data[pair] = {};
+        data[pair][tenor] = { vol, rr: isNaN(rr) ? null : rr };
+    });
+    return data;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Formatting
+// ─────────────────────────────────────────────────────────────────
+
+function fmtSigned(v, dp=2) {
+    if (v == null || isNaN(v)) return '—';
+    return (v >= 0 ? '+' : '') + v.toFixed(dp);
+}
+
+function colorClass(v) {
+    if (v == null || isNaN(v)) return '';
+    if (v > 0.005) return 'val-pos';
+    if (v < -0.005) return 'val-neg';
+    return '';
+}
+
+function td(val, colored=false) {
+    const cls = colored ? colorClass(parseFloat(String(val).replace('+',''))) : '';
+    return `<td class="${cls}">${val}</td>`;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Tab 1: Single pair
+// ─────────────────────────────────────────────────────────────────
+
+function computeSingle() {
+    const text = document.getElementById('single-data').value;
+    const pair = document.getElementById('single-pair').value.toUpperCase();
+    const lines = text.split('\n');
+    const results = [];
+
+    lines.forEach(line => {
+        line = line.trim();
+        if (!line || line.startsWith('#')) return;
+        const parts = line.replace(/,/g,' ').replace(/\t/g,' ').split(/\s+/);
+        if (parts.length < 3) return;
+        const tenor = parts[0].toUpperCase();
+        const vol = parseFloat(parts[1]);
+        const rr = parseFloat(parts[2]);
+        if (isNaN(vol) || isNaN(rr)) return;
+        const beta = impliedBeta(vol, rr, tenor);
+        if (beta !== null) {
+            results.push({ tenor, vol, rr, beta, rrAtm: rr / vol });
+        }
+    });
+
+    let html = `<div class="card"><div class="section-title">${pair} — Implied Beta</div>`;
+    html += '<table class="data-table"><thead><tr>';
+    ['Tenor','Vol %','RR %','Beta','RR/ATM'].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    results.forEach(r => {
+        html += '<tr>';
+        html += `<td>${r.tenor}</td>`;
+        html += `<td>${r.vol.toFixed(2)}</td>`;
+        html += td(fmtSigned(r.rr), true);
+        html += td(fmtSigned(r.beta), true);
+        html += td(fmtSigned(r.rrAtm, 3), true);
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+    document.getElementById('single-results').innerHTML = html;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Tab 2: Cross decomposition
+// ─────────────────────────────────────────────────────────────────
+
+let lastCrossResults = null; // for email report
+
+function computeCross() {
+    const data = parseData(document.getElementById('cross-data').value);
+
+    const allPairs = Object.keys(data);
+    const crosses = allPairs.filter(p => CROSS_LEGS[p]);
+    const usdPairs = allPairs.filter(p => !CROSS_LEGS[p]);
+
+    // Collect all tenors
+    const tenorSet = new Set();
+    allPairs.forEach(p => Object.keys(data[p]).forEach(t => tenorSet.add(t)));
+    const allTenors = sortTenors([...tenorSet]);
+
+    let html = '';
+
+    // ── USD pair betas ──
+    html += '<div class="card"><div class="section-title">USD Pair Betas</div>';
+    html += '<table class="data-table"><thead><tr>';
+    ['Pair','Tenor','Vol %','RR %','Beta','RR/ATM'].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    const betaRows = [];
+    usdPairs.sort().forEach(pair => {
+        allTenors.forEach(tenor => {
+            const d = data[pair] && data[pair][tenor];
+            if (!d || d.rr == null || d.vol <= 0) return;
+            const beta = impliedBeta(d.vol, d.rr, tenor);
+            if (beta == null) return;
+            betaRows.push({ pair, tenor, vol: d.vol, rr: d.rr, beta, rrAtm: d.rr / d.vol });
+            html += '<tr>';
+            html += `<td>${pair}</td><td>${tenor}</td>`;
+            html += `<td>${d.vol.toFixed(2)}</td>`;
+            html += td(fmtSigned(d.rr), true);
+            html += td(fmtSigned(beta), true);
+            html += td(fmtSigned(d.rr / d.vol, 3), true);
+            html += '</tr>';
+        });
+    });
+    html += '</tbody></table></div>';
+
+    // ── Cross decomposition ──
+    html += '<div class="card"><div class="section-title">Cross Predicted vs Market RR</div>';
+    html += '<table class="data-table"><thead><tr>';
+    ['Cross','Tenor','Legs','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    const crossResults = [];
+
+    crosses.forEach(cross => {
+        const [leg1, leg2, sign] = CROSS_LEGS[cross];
+
+        allTenors.forEach(tenor => {
+            const dc = data[cross] && data[cross][tenor];
+            const d1 = data[leg1] && data[leg1][tenor];
+            const d2 = data[leg2] && data[leg2][tenor];
+            if (!dc || !d1 || !d2 || d1.rr == null || d2.rr == null) return;
+
+            const s1 = d1.vol / 100, s2 = d2.vol / 100, sc = dc.vol / 100;
+            const varCross = sc * sc;
+
+            // Implied correlation
+            let rho = (sc*sc - s1*s1 - s2*s2) / (2 * sign * s1 * s2);
+            rho = Math.max(-1, Math.min(1, rho));
+
+            // Betas
+            const beta1 = impliedBeta(d1.vol, d1.rr, tenor);
+            const beta2 = impliedBeta(d2.vol, d2.rr, tenor);
+            if (beta1 == null || beta2 == null) return;
+
+            // Vol weights
+            const volW1 = (s1 + sign * rho * s2) / sc;
+            const volW2 = (s2 + sign * rho * s1) / sc;
+
+            // Spot weights
+            const spotW1 = (s1*s1 + sign * rho * s1 * s2) / varCross;
+            const spotW2 = (rho * s1 * s2 + sign * s2 * s2) / varCross;
+
+            // Cross beta
+            const betaCross = volW1 * beta1 * spotW1 + volW2 * beta2 * spotW2;
+
+            // Predicted RR
+            const predRR = fairRR(betaCross, dc.vol, tenor);
+            const mktRR = dc.rr;
+            const residual = mktRR != null && predRR != null ? mktRR - predRR : null;
+
+            crossResults.push({
+                cross, tenor, leg1, leg2, rho, beta1, beta2,
+                volW1, volW2, spotW1, spotW2, betaCross, predRR, mktRR, residual
+            });
+
+            html += '<tr>';
+            html += `<td>${cross}</td><td>${tenor}</td>`;
+            html += `<td>${leg1} / ${leg2}</td>`;
+            html += `<td>${rho.toFixed(2)}</td>`;
+            html += td(fmtSigned(betaCross), true);
+            html += td(fmtSigned(predRR), true);
+            html += td(mktRR != null ? fmtSigned(mktRR) : '—', true);
+            html += td(residual != null ? fmtSigned(residual) : '—', true);
+            html += '</tr>';
+        });
+    });
+
+    html += '</tbody></table></div>';
+
+    document.getElementById('cross-results').innerHTML = html;
+    lastCrossResults = { betaRows, crossResults };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Email report
+// ─────────────────────────────────────────────────────────────────
+
+function copyEmailReport() {
+    if (!lastCrossResults) {
+        computeCross();
+    }
+    const { betaRows, crossResults } = lastCrossResults;
+    const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+
+    let h = `<div style="font-family: Consolas, Monaco, 'Courier New', monospace; font-size: 12px; color: #1f2937; max-width: 900px;">`;
+    h += `<h2 style="font-size: 14px; color: #0d1117; border-bottom: 2px solid #06b6d4; padding-bottom: 6px;">SPOT-VOL CROSS RR DECOMPOSITION</h2>`;
+    h += `<p style="color: #6b7280; font-size: 11px;">Generated: ${now} EST</p>`;
+
+    // USD pair betas
+    h += `<h3 style="font-size: 12px; margin-top: 16px;">USD PAIR BETAS</h3>`;
+    h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
+    h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
+    ['Pair','Tenor','Vol%','RR%','Beta'].forEach(hd => {
+        h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`;
+    });
+    h += `</tr>`;
+    betaRows.forEach(r => {
+        h += `<tr>`;
+        h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.pair}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.tenor}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.vol.toFixed(2)}</td>`;
+        const rrCol = r.rr < 0 ? '#ef4444' : r.rr > 0 ? '#22c55e' : '#1f2937';
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${rrCol};">${fmtSigned(r.rr)}</td>`;
+        const bCol = r.beta < 0 ? '#ef4444' : r.beta > 0 ? '#22c55e' : '#1f2937';
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bCol};">${fmtSigned(r.beta)}</td>`;
+        h += `</tr>`;
+    });
+    h += `</table>`;
+
+    // Cross results
+    h += `<h3 style="font-size: 12px; margin-top: 16px;">CROSS RR: PREDICTED vs MARKET</h3>`;
+    h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
+    h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
+    ['Cross','Tenor','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(hd => {
+        h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`;
+    });
+    h += `</tr>`;
+    crossResults.forEach(r => {
+        h += `<tr>`;
+        h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.cross}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.tenor}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.rho.toFixed(2)}</td>`;
+        const bcCol = r.betaCross < 0 ? '#ef4444' : '#22c55e';
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bcCol};">${fmtSigned(r.betaCross)}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${fmtSigned(r.predRR)}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.mktRR != null ? fmtSigned(r.mktRR) : '—'}</td>`;
+        const resCol = r.residual > 0 ? '#22c55e' : r.residual < 0 ? '#ef4444' : '#1f2937';
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${resCol};">${r.residual != null ? fmtSigned(r.residual) : '—'}</td>`;
+        h += `</tr>`;
+    });
+    h += `</table>`;
+
+    h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">Beta = vol pts per 1% spot · SF=0.5 · Calendar days · Analytical Greeks</p>`;
+    h += `</div>`;
+
+    // Copy as HTML
+    try {
+        const blob = new Blob([h], { type: 'text/html' });
+        const item = new ClipboardItem({ 'text/html': blob, 'text/plain': new Blob([h], { type: 'text/plain' }) });
+        navigator.clipboard.write([item]).then(() => {
+            showStatus('cross-status', 'Email report copied to clipboard — paste into Outlook/Gmail', 'success');
+        });
+    } catch (e) {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = h;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showStatus('cross-status', 'HTML copied (fallback) — paste into email', 'success');
+    }
+}
+
+function showStatus(id, msg, type) {
+    const el = document.getElementById(id);
+    el.innerHTML = `<div class="status status-${type}">${msg}</div>`;
+    setTimeout(() => el.innerHTML = '', 4000);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Tab switching
+// ─────────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    event.target.classList.add('active');
+}
+
+// Auto-calculate on load
+window.addEventListener('load', () => {
+    computeSingle();
+    computeCross();
+});
+</script>
+</body>
+</html>

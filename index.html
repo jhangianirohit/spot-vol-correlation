@@ -398,29 +398,7 @@ const TENOR_ORDER = ['ON','1D','1W','2W','3W','1M','2M','3M','6M','9M','1Y','2Y'
 const TENOR_RANK = {};
 TENOR_ORDER.forEach((t,i) => TENOR_RANK[t] = i);
 
-const BETA_CONST = 1.4826; // 1 / (2 * 0.5 * 0.6745)
-
-// Cross definitions: [leg1, leg2, sign]
-// sign=+1: cross = leg1 × leg2, sign=-1: cross = leg1 / leg2
-const CROSS_LEGS = {
-    'EURJPY':['EURUSD','USDJPY',1],'EURCHF':['EURUSD','USDCHF',1],
-    'EURCNH':['EURUSD','USDCNH',1],'EURGBP':['EURUSD','GBPUSD',-1],
-    'EURAUD':['EURUSD','AUDUSD',-1],'EURNZD':['EURUSD','NZDUSD',-1],
-    'EURNOK':['EURUSD','USDNOK',1],'EURSEK':['EURUSD','USDSEK',1],
-    'EURCAD':['EURUSD','USDCAD',1],'EURSGD':['EURUSD','USDSGD',1],
-    'GBPJPY':['GBPUSD','USDJPY',1],'GBPCHF':['GBPUSD','USDCHF',1],
-    'GBPCNH':['GBPUSD','USDCNH',1],'GBPAUD':['GBPUSD','AUDUSD',-1],
-    'GBPNZD':['GBPUSD','NZDUSD',-1],'GBPCAD':['GBPUSD','USDCAD',1],
-    'AUDJPY':['AUDUSD','USDJPY',1],'AUDCHF':['AUDUSD','USDCHF',1],
-    'AUDCNH':['AUDUSD','USDCNH',1],'AUDNZD':['AUDUSD','NZDUSD',-1],
-    'AUDSGD':['AUDUSD','USDSGD',1],'AUDCAD':['AUDUSD','USDCAD',1],
-    'NZDJPY':['NZDUSD','USDJPY',1],'NZDCHF':['NZDUSD','USDCHF',1],
-    'NZDCAD':['NZDUSD','USDCAD',1],
-    'CADJPY':['USDJPY','USDCAD',-1],'CADCHF':['USDCHF','USDCAD',-1],
-    'CHFJPY':['USDJPY','USDCHF',-1],'SGDJPY':['USDJPY','USDSGD',-1],
-    'CNHJPY':['USDJPY','USDCNH',-1],
-    'NOKSEK':['USDSEK','USDNOK',-1],
-};
+const BETA_CONST = 1.4826;
 
 // ─────────────────────────────────────────────────────────────────
 // Core math
@@ -432,22 +410,79 @@ function tenorToT(tenor) {
 }
 
 function impliedBeta(vol, rr, tenor) {
-    // vol and rr in % (e.g., 7.5, -1.03)
-    // returns beta in vol pts per 1% spot
     const T = tenorToT(tenor);
     if (!T || vol === 0) return null;
     return BETA_CONST * rr / (vol * Math.sqrt(T));
 }
 
 function fairRR(beta, vol, tenor) {
-    // inverse: beta → RR in %
     const T = tenorToT(tenor);
     if (!T) return null;
     return beta * vol * Math.sqrt(T) / BETA_CONST;
 }
 
 function sortTenors(arr) {
-    return arr.sort((a, b) => (TENOR_RANK[a] || 999) - (TENOR_RANK[b] || 999));
+    return [...arr].sort((a, b) => (TENOR_RANK[a] || 999) - (TENOR_RANK[b] || 999));
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Dynamic cross detection — no hardcoded pairs
+// ─────────────────────────────────────────────────────────────────
+
+function hasUSD(pair) {
+    return pair.startsWith('USD') || pair.endsWith('USD');
+}
+
+function getCurrencies(pair) {
+    // Returns [lhs, rhs] — each 3 letters
+    return [pair.slice(0, 3), pair.slice(3, 6)];
+}
+
+function getNonUSDCcy(pair) {
+    const [lhs, rhs] = getCurrencies(pair);
+    if (lhs === 'USD') return rhs;
+    if (rhs === 'USD') return lhs;
+    return null;
+}
+
+function ccySign(pair, ccy) {
+    // For a USD pair containing ccy:
+    // Returns the sign such that d(ccy value in USD) = sign × d(pair)
+    // If pair = CCYUSD: ccy strengthens → pair goes up → sign = +1
+    // If pair = USDCCY: ccy strengthens → pair goes down → sign = -1
+    const [lhs, rhs] = getCurrencies(pair);
+    if (lhs === ccy && rhs === 'USD') return +1;  // CCYUSD
+    if (lhs === 'USD' && rhs === ccy) return -1;  // USDCCY
+    return 0;
+}
+
+function findUSDPairForCcy(ccy, usdPairs) {
+    // Find which USD pair in the data contains this currency
+    for (const pair of usdPairs) {
+        if (getNonUSDCcy(pair) === ccy) return pair;
+    }
+    return null;
+}
+
+function decomposeCross(crossPair, usdPairs) {
+    // Given a cross pair (e.g., CHFJPY) and a list of available USD pairs,
+    // returns { pair1, pair2, a, b, combinedSign } or null
+    // where d(cross) = a × d(pair1) + b × d(pair2)
+    // and σ² = σ₁² + σ₂² + 2ab × ρ × σ₁σ₂
+    const [ccy1, ccy2] = getCurrencies(crossPair);
+    const pair1 = findUSDPairForCcy(ccy1, usdPairs);
+    const pair2 = findUSDPairForCcy(ccy2, usdPairs);
+    if (!pair1 || !pair2) return null;
+
+    // d(cross) = d(ccy1 in USD) - d(ccy2 in USD)
+    //          = sign1 × d(pair1) - sign2 × d(pair2)
+    //          = sign1 × d(pair1) + (-sign2) × d(pair2)
+    const sign1 = ccySign(pair1, ccy1);
+    const sign2 = ccySign(pair2, ccy2);
+    const a = sign1;       // coefficient of d(pair1)
+    const b = -sign2;      // coefficient of d(pair2)
+
+    return { pair1, pair2, a, b, combinedSign: a * b };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -455,7 +490,6 @@ function sortTenors(arr) {
 // ─────────────────────────────────────────────────────────────────
 
 function parseData(text) {
-    // Returns: { pair: { tenor: { vol, rr } } }
     const data = {};
     text.split('\n').forEach(line => {
         line = line.trim();
@@ -474,7 +508,7 @@ function parseData(text) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Formatting
+// Formatting — brighter colors for dark background
 // ─────────────────────────────────────────────────────────────────
 
 function fmtSigned(v, dp=2) {
@@ -482,27 +516,24 @@ function fmtSigned(v, dp=2) {
     return (v >= 0 ? '+' : '') + v.toFixed(dp);
 }
 
-// Intensity-based color: deeper color for larger absolute values
-// Returns an inline style string with color and optional background
 function intensityColor(v, maxAbs=null) {
-    if (v == null || isNaN(v) || Math.abs(v) < 0.005) return 'color: var(--text-secondary);';
-    // Clamp intensity 0-1
-    const cap = maxAbs || 3.0; // default scale: ±3 is fully saturated
+    if (v == null || isNaN(v) || Math.abs(v) < 0.005) return 'color: #6b7280;';
+    const cap = maxAbs || 3.0;
     const intensity = Math.min(Math.abs(v) / cap, 1.0);
     if (v > 0) {
-        // Green spectrum: from dim to bright
-        const r = Math.round(34 + (1 - intensity) * 60);
-        const g = Math.round(120 + intensity * 77);
-        const b = Math.round(50 + (1 - intensity) * 44);
-        const bg = `rgba(34, 197, 94, ${intensity * 0.12})`;
-        return `color: rgb(${r},${g},${b}); background: ${bg};`;
+        // Bright green on dark: from #5a9a6b at low to #4ade80 at high
+        const r = Math.round(74 - intensity * 10);
+        const g = Math.round(154 + intensity * 68);
+        const b = Math.round(107 - intensity * 20);
+        const bg = `rgba(74, 222, 128, ${0.06 + intensity * 0.18})`;
+        return `color: rgb(${r},${g},${b}); background: ${bg}; font-weight: ${intensity > 0.5 ? 600 : 400};`;
     } else {
-        // Red spectrum: from dim to bright
-        const r = Math.round(180 + intensity * 59);
-        const g = Math.round(100 - intensity * 60);
-        const b = Math.round(80 - intensity * 36);
-        const bg = `rgba(239, 68, 68, ${intensity * 0.12})`;
-        return `color: rgb(${r},${g},${b}); background: ${bg};`;
+        // Bright red on dark: from #b87070 at low to #f87171 at high
+        const r = Math.round(184 + intensity * 64);
+        const g = Math.round(112 - intensity * 50);
+        const b = Math.round(112 - intensity * 40);
+        const bg = `rgba(248, 113, 113, ${0.06 + intensity * 0.18})`;
+        return `color: rgb(${r},${g},${b}); background: ${bg}; font-weight: ${intensity > 0.5 ? 600 : 400};`;
     }
 }
 
@@ -565,16 +596,16 @@ function computeSingle() {
 // Tab 2: Cross decomposition
 // ─────────────────────────────────────────────────────────────────
 
-let lastCrossResults = null; // for email report
+let lastCrossResults = null;
 
 function computeCross() {
     const data = parseData(document.getElementById('cross-data').value);
-
     const allPairs = Object.keys(data);
-    const crosses = allPairs.filter(p => CROSS_LEGS[p]);
-    const usdPairs = allPairs.filter(p => !CROSS_LEGS[p]);
 
-    // Collect all tenors
+    // Dynamically classify: USD pairs vs crosses
+    const usdPairs = allPairs.filter(p => hasUSD(p));
+    const crosses = allPairs.filter(p => !hasUSD(p));
+
     const tenorSet = new Set();
     allPairs.forEach(p => Object.keys(data[p]).forEach(t => tenorSet.add(t)));
     const allTenors = sortTenors([...tenorSet]);
@@ -612,42 +643,47 @@ function computeCross() {
     });
     html += '</tbody></table></div>';
 
-    // ── Cross decomposition ──
+    // ── Cross decomposition (dynamic leg detection) ──
     html += '<div class="card"><div class="section-title">Cross Predicted vs Market RR</div>';
     html += '<table class="data-table"><thead><tr>';
-    ['Cross','Tenor','Legs','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(h => html += `<th>${h}</th>`);
+    ['Cross','Tenor','Legs','ρ vol','β cross','Pred RR%','Mkt RR%','Residual','ρ skew'].forEach(h => html += `<th>${h}</th>`);
     html += '</tr></thead><tbody>';
 
     const crossResults = [];
 
     crosses.forEach(cross => {
-        const [leg1, leg2, sign] = CROSS_LEGS[cross];
+        const decomp = decomposeCross(cross, usdPairs);
+        if (!decomp) return;
+        const { pair1, pair2, a, b, combinedSign } = decomp;
 
         allTenors.forEach(tenor => {
             const dc = data[cross] && data[cross][tenor];
-            const d1 = data[leg1] && data[leg1][tenor];
-            const d2 = data[leg2] && data[leg2][tenor];
+            const d1 = data[pair1] && data[pair1][tenor];
+            const d2 = data[pair2] && data[pair2][tenor];
             if (!dc || !d1 || !d2 || d1.rr == null || d2.rr == null) return;
 
             const s1 = d1.vol / 100, s2 = d2.vol / 100, sc = dc.vol / 100;
             const varCross = sc * sc;
+            const cs = combinedSign; // a × b
 
-            // Implied correlation
-            let rho = (sc*sc - s1*s1 - s2*s2) / (2 * sign * s1 * s2);
-            rho = Math.max(-1, Math.min(1, rho));
+            // ρ from vols: σ² = σ₁² + σ₂² + 2·cs·ρ·σ₁σ₂
+            let rhoVol = (sc*sc - s1*s1 - s2*s2) / (2 * cs * s1 * s2);
+            rhoVol = Math.max(-1, Math.min(1, rhoVol));
 
             // Betas
             const beta1 = impliedBeta(d1.vol, d1.rr, tenor);
             const beta2 = impliedBeta(d2.vol, d2.rr, tenor);
             if (beta1 == null || beta2 == null) return;
 
-            // Vol weights
-            const volW1 = (s1 + sign * rho * s2) / sc;
-            const volW2 = (s2 + sign * rho * s1) / sc;
+            // Vol weights: ∂σ_cross/∂σ_leg
+            const volW1 = (s1 + cs * rhoVol * s2) / sc;
+            const volW2 = (s2 + cs * rhoVol * s1) / sc;
 
-            // Spot weights
-            const spotW1 = (s1*s1 + sign * rho * s1 * s2) / varCross;
-            const spotW2 = (rho * s1 * s2 + sign * s2 * s2) / varCross;
+            // Spot weights: E[d(leg)|d(cross)=1%]
+            // Cov(pair1, cross) = a² σ₁² + ab ρ σ₁σ₂ = σ₁² + cs ρ σ₁σ₂ (since a²=1)
+            // Cov(pair2, cross) = ab ρ σ₁σ₂ + b² σ₂² = cs ρ σ₁σ₂ + σ₂²
+            const spotW1 = (s1*s1 + cs * rhoVol * s1 * s2) / varCross;
+            const spotW2 = (cs * rhoVol * s1 * s2 + s2*s2) / varCross;
 
             // Cross beta
             const betaCross = volW1 * beta1 * spotW1 + volW2 * beta2 * spotW2;
@@ -657,26 +693,49 @@ function computeCross() {
             const mktRR = dc.rr;
             const residual = mktRR != null && predRR != null ? mktRR - predRR : null;
 
+            // ── ρ dislocation: what ρ would make predicted = market? ──
+            // We solve: fairRR(betaCross(ρ), crossVol, tenor) = mktRR
+            // Binary search over ρ
+            let rhoSkew = null;
+            if (mktRR != null) {
+                let lo = -0.999, hi = 0.999;
+                for (let iter = 0; iter < 60; iter++) {
+                    const mid = (lo + hi) / 2;
+                    const vw1 = (s1 + cs * mid * s2) / sc;
+                    const vw2 = (s2 + cs * mid * s1) / sc;
+                    const varC_mid = s1*s1 + s2*s2 + 2*cs*mid*s1*s2;
+                    const sw1 = (s1*s1 + cs * mid * s1 * s2) / varC_mid;
+                    const sw2 = (cs * mid * s1 * s2 + s2*s2) / varC_mid;
+                    const bc = vw1 * beta1 * sw1 + vw2 * beta2 * sw2;
+                    const pr = fairRR(bc, dc.vol, tenor);
+                    if (pr < mktRR) hi = mid; else lo = mid;
+                }
+                rhoSkew = (lo + hi) / 2;
+            }
+
             crossResults.push({
-                cross, tenor, leg1, leg2, rho, beta1, beta2,
+                cross, tenor, pair1, pair2, a, b, rhoVol, rhoSkew, beta1, beta2,
                 volW1, volW2, spotW1, spotW2, betaCross, predRR, mktRR, residual
             });
 
+            const rhoDiff = rhoSkew != null ? rhoSkew - rhoVol : null;
+
             html += '<tr>';
             html += `<td>${cross}</td><td>${tenor}</td>`;
-            html += `<td>${leg1} / ${leg2}</td>`;
-            html += `<td>${rho.toFixed(2)}</td>`;
+            html += `<td>${pair1} / ${pair2}</td>`;
+            html += `<td>${rhoVol.toFixed(2)}</td>`;
             html += td(fmtSigned(betaCross), true, 3);
             html += td(fmtSigned(predRR), true, 2);
             html += td(mktRR != null ? fmtSigned(mktRR) : '—', true, 2);
             html += td(residual != null ? fmtSigned(residual) : '—', true, 0.5);
+            html += `<td>${rhoSkew != null ? rhoSkew.toFixed(2) : '—'}</td>`;
             html += '</tr>';
         });
     });
 
     html += '</tbody></table></div>';
 
-    // ── Residual heatmap matrix: Cross × Tenor ──
+    // ── Residual heatmap ──
     if (crossResults.length > 0) {
         const crossNames = [...new Set(crossResults.map(r => r.cross))];
         const crossTenors = sortTenors([...new Set(crossResults.map(r => r.tenor))]);
@@ -684,30 +743,51 @@ function computeCross() {
         let maxRes = 0;
         crossResults.forEach(r => {
             if (r.residual != null) {
-                const key = r.cross + '|' + r.tenor;
-                resMap[key] = r.residual;
+                resMap[r.cross + '|' + r.tenor] = r.residual;
                 maxRes = Math.max(maxRes, Math.abs(r.residual));
             }
         });
-        if (maxRes < 0.01) maxRes = 0.5; // minimum scale
+        if (maxRes < 0.01) maxRes = 0.5;
 
         html += '<div class="card"><div class="section-title">Residual Heatmap (Market − Predicted RR%)</div>';
-        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Positive (green) = cross RR cheap vs model · Negative (red) = rich</div>';
+        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Positive (green) = cross RR cheap · Negative (red) = rich</div>';
         html += '<table class="data-table"><thead><tr><th>Cross</th>';
         crossTenors.forEach(t => html += `<th>${t}</th>`);
         html += '</tr></thead><tbody>';
-
         crossNames.forEach(cross => {
             html += '<tr>';
             html += `<td>${cross}</td>`;
             crossTenors.forEach(tenor => {
-                const key = cross + '|' + tenor;
-                const v = resMap[key];
-                if (v != null) {
-                    html += td(fmtSigned(v), true, maxRes);
-                } else {
-                    html += '<td style="color:var(--text-muted);">—</td>';
-                }
+                const v = resMap[cross + '|' + tenor];
+                html += v != null ? td(fmtSigned(v), true, maxRes) : '<td style="color:#484f58;">—</td>';
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+
+        // ── ρ dislocation heatmap ──
+        const rhoMap = {};
+        let maxRhoDiff = 0;
+        crossResults.forEach(r => {
+            if (r.rhoSkew != null) {
+                const diff = r.rhoSkew - r.rhoVol;
+                rhoMap[r.cross + '|' + r.tenor] = diff;
+                maxRhoDiff = Math.max(maxRhoDiff, Math.abs(diff));
+            }
+        });
+        if (maxRhoDiff < 0.01) maxRhoDiff = 0.2;
+
+        html += '<div class="card"><div class="section-title">ρ Dislocation (ρ_skew − ρ_vol)</div>';
+        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">How much correlation needs to shift from vol-implied to match market RR</div>';
+        html += '<table class="data-table"><thead><tr><th>Cross</th>';
+        crossTenors.forEach(t => html += `<th>${t}</th>`);
+        html += '</tr></thead><tbody>';
+        crossNames.forEach(cross => {
+            html += '<tr>';
+            html += `<td>${cross}</td>`;
+            crossTenors.forEach(tenor => {
+                const v = rhoMap[cross + '|' + tenor];
+                html += v != null ? td(fmtSigned(v), true, maxRhoDiff) : '<td style="color:#484f58;">—</td>';
             });
             html += '</tr>';
         });
@@ -758,7 +838,7 @@ function copyEmailReport() {
     h += `<h3 style="font-size: 12px; margin-top: 16px;">CROSS RR: PREDICTED vs MARKET</h3>`;
     h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
     h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
-    ['Cross','Tenor','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(hd => {
+    ['Cross','Tenor','ρ vol','β cross','Pred RR%','Mkt RR%','Residual','ρ skew'].forEach(hd => {
         h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`;
     });
     h += `</tr>`;
@@ -766,7 +846,7 @@ function copyEmailReport() {
         h += `<tr>`;
         h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.cross}</td>`;
         h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.tenor}</td>`;
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.rho.toFixed(2)}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.rhoVol.toFixed(2)}</td>`;
         const bcC = emailColor(r.betaCross, 3);
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${bcC.color}; background: ${bcC.bg};">${fmtSigned(r.betaCross)}</td>`;
         const prC = emailColor(r.predRR, 2);
@@ -775,6 +855,7 @@ function copyEmailReport() {
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${mkC.color}; background: ${mkC.bg};">${r.mktRR != null ? fmtSigned(r.mktRR) : '—'}</td>`;
         const rsC = emailColor(r.residual, 0.5);
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${rsC.color}; background: ${rsC.bg};">${r.residual != null ? fmtSigned(r.residual) : '—'}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.rhoSkew != null ? r.rhoSkew.toFixed(2) : '—'}</td>`;
         h += `</tr>`;
     });
     h += `</table>`;

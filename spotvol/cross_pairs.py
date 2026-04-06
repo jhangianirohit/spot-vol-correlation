@@ -53,16 +53,16 @@ CROSS_LEGS = {
     "NZDCHF":  ("NZDUSD", "USDCHF",  +1),
     "NZDCAD":  ("NZDUSD", "USDCAD",  +1),
     # CAD crosses
-    "CADJPY":  ("USDCAD", "USDJPY",  -1),  # CADJPY = USDJPY / USDCAD
-    "CADCHF":  ("USDCAD", "USDCHF",  -1),  # CADCHF = USDCHF / USDCAD
+    "CADJPY":  ("USDJPY", "USDCAD",  -1),  # CADJPY = USDJPY / USDCAD
+    "CADCHF":  ("USDCHF", "USDCAD",  -1),  # CADCHF = USDCHF / USDCAD
     # NOK/SEK
-    "NOKSEK":  ("USDNOK", "USDSEK",  -1),  # NOKSEK = USDSEK / USDNOK
+    "NOKSEK":  ("USDSEK", "USDNOK",  -1),  # NOKSEK = USDSEK / USDNOK
     # CHF
-    "CHFJPY":  ("USDCHF", "USDJPY",  -1),  # CHFJPY = USDJPY / USDCHF
+    "CHFJPY":  ("USDJPY", "USDCHF",  -1),  # CHFJPY = USDJPY / USDCHF
     # SGD
-    "SGDJPY":  ("USDSGD", "USDJPY",  -1),  # SGDJPY = USDJPY / USDSGD
+    "SGDJPY":  ("USDJPY", "USDSGD",  -1),  # SGDJPY = USDJPY / USDSGD
     # CNH
-    "CNHJPY":  ("USDCNH", "USDJPY",  -1),  # CNHJPY = USDJPY / USDCNH
+    "CNHJPY":  ("USDJPY", "USDCNH",  -1),  # CNHJPY = USDJPY / USDCNH
 }
 
 

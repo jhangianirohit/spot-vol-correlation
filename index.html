@@ -682,8 +682,10 @@ function computeCross() {
             // Spot weights: E[d(leg)|d(cross)=1%]
             // Cov(pair1, cross) = a² σ₁² + ab ρ σ₁σ₂ = σ₁² + cs ρ σ₁σ₂ (since a²=1)
             // Cov(pair2, cross) = ab ρ σ₁σ₂ + b² σ₂² = cs ρ σ₁σ₂ + σ₂²
-            const spotW1 = (s1*s1 + cs * rhoVol * s1 * s2) / varCross;
-            const spotW2 = (cs * rhoVol * s1 * s2 + s2*s2) / varCross;
+            // Cov(pair1, cross) = a×σ₁² + b×ρσ₁σ₂
+            // Cov(pair2, cross) = a×ρσ₁σ₂ + b×σ₂²
+            const spotW1 = (a*s1*s1 + b*rhoVol*s1*s2) / varCross;
+            const spotW2 = (a*rhoVol*s1*s2 + b*s2*s2) / varCross;
 
             // Cross beta
             const betaCross = volW1 * beta1 * spotW1 + volW2 * beta2 * spotW2;
@@ -704,8 +706,8 @@ function computeCross() {
                     const vw1 = (s1 + cs * mid * s2) / sc;
                     const vw2 = (s2 + cs * mid * s1) / sc;
                     const varC_mid = s1*s1 + s2*s2 + 2*cs*mid*s1*s2;
-                    const sw1 = (s1*s1 + cs * mid * s1 * s2) / varC_mid;
-                    const sw2 = (cs * mid * s1 * s2 + s2*s2) / varC_mid;
+                    const sw1 = (a*s1*s1 + b*mid*s1*s2) / varC_mid;
+                    const sw2 = (a*mid*s1*s2 + b*s2*s2) / varC_mid;
                     const bc = vw1 * beta1 * sw1 + vw2 * beta2 * sw2;
                     const pr = fairRR(bc, dc.vol, tenor);
                     if (pr < mktRR) hi = mid; else lo = mid;

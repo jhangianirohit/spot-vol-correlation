@@ -140,11 +140,13 @@ def decompose_cross(
     vol_w1 = (sigma1 + sign * rho * sigma2) / sigma_cross
     vol_w2 = (sigma2 + sign * rho * sigma1) / sigma_cross
 
-    # Spot decomposition: when cross moves 1%, expected leg moves
-    # Cov(leg1, cross) = σ²₁ + s×ρ×σ₁×σ₂
-    # Cov(leg2, cross) = ρ×σ₁×σ₂ + s×σ²₂
-    spot_w1 = (sigma1**2 + sign * rho * sigma1 * sigma2) / var_cross
-    spot_w2 = (rho * sigma1 * sigma2 + sign * sigma2**2) / var_cross
+    # Spot decomposition: d(cross) = a×d(leg1) + b×d(leg2) where a=1, b=sign
+    # Cov(leg1, cross) = a×σ²₁ + b×ρ×σ₁×σ₂
+    # Cov(leg2, cross) = a×ρ×σ₁×σ₂ + b×σ²₂
+    a = 1
+    b = sign
+    spot_w1 = (a * sigma1**2 + b * rho * sigma1 * sigma2) / var_cross
+    spot_w2 = (a * rho * sigma1 * sigma2 + b * sigma2**2) / var_cross
 
     # Cross beta
     beta_cross = vol_w1 * r1.beta * spot_w1 + vol_w2 * r2.beta * spot_w2

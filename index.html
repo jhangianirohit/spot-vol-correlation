@@ -422,7 +422,11 @@ function fairRR(beta, vol, tenor) {
 }
 
 function sortTenors(arr) {
-    return [...arr].sort((a, b) => (TENOR_RANK[a] || 999) - (TENOR_RANK[b] || 999));
+    return [...arr].sort((a, b) => {
+        const ra = TENOR_RANK[a] !== undefined ? TENOR_RANK[a] : 999;
+        const rb = TENOR_RANK[b] !== undefined ? TENOR_RANK[b] : 999;
+        return ra - rb;
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────

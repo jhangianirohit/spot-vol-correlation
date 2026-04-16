@@ -986,6 +986,11 @@ function computeBasket() {
         return;
     }
 
+    // Add sum-to-zero constraint: Σ β_i = 0 (pins absolute level)
+    const constraintRow = new Array(N).fill(1);
+    A_rows.push(constraintRow);
+    b_vec.push(0);
+
     // Least squares: solve A × x = b
     // Using normal equations: x = (AᵀA)⁻¹ Aᵀb
     const AT = [];

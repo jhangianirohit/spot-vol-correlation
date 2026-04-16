@@ -151,6 +151,10 @@ def solve_currency_betas(pairs_data, tenor):
     if len(rows) < N_ccy:
         return None, basket_vols, []
 
+    # Add sum-to-zero constraint: Σ β_i = 0 (pins absolute level)
+    rows.append(np.ones(N_ccy))
+    obs_betas.append(0.0)
+
     A = np.array(rows)
     b = np.array(obs_betas)
 

@@ -301,6 +301,7 @@ textarea.data-input:focus {
 <div class="tab-nav">
     <button class="tab-btn active" onclick="switchTab('single')">Single Pair</button>
     <button class="tab-btn" onclick="switchTab('cross')">Cross Decomposition</button>
+    <button class="tab-btn" onclick="switchTab('basket')">Basket Decomposition</button>
 </div>
 
 <!-- ═══════════ TAB 1: SINGLE PAIR ═══════════ -->
@@ -377,6 +378,50 @@ EURGBP	3M	5.00	-0.15</textarea>
         </div>
         <div>
             <div id="cross-results"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════ TAB 3: BASKET DECOMPOSITION ═══════════ -->
+<div id="tab-basket" class="tab-panel">
+    <div class="two-col">
+        <div>
+            <div class="card">
+                <div class="section-title">All Vols &amp; RRs (single tenor)</div>
+                <div style="margin-bottom:6px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.04em;">
+                    Pair Vol(%) RR(%) · Include USD pairs AND crosses · One tenor
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Tenor</label>
+                        <input id="basket-tenor" value="1M" style="width:80px;">
+                    </div>
+                </div>
+                <textarea id="basket-data" class="data-input" rows="22">EURUSD	7.53	-1.03
+USDJPY	8.81	-0.46
+GBPUSD	6.92	-0.69
+AUDUSD	10.07	-0.98
+USDCHF	8.12	-0.04
+USDCNH	3.55	-0.25
+NZDUSD	10.20	-0.85
+EURJPY	10.80	-0.45
+EURGBP	5.20	-0.25
+EURCNH	6.38	-0.65
+GBPJPY	11.50	-0.55
+GBPAUD	7.54	+0.19
+AUDJPY	12.20	-0.90
+AUDNZD	6.80	-0.10
+CHFJPY	8.43	-0.71
+NZDJPY	12.80	-0.95</textarea>
+                <div class="btn-row">
+                    <button class="btn" onclick="computeBasket()">Calculate</button>
+                    <button class="btn" onclick="copyBasketEmail()">Copy Email Report</button>
+                </div>
+                <div id="basket-status"></div>
+            </div>
+        </div>
+        <div>
+            <div id="basket-results"></div>
         </div>
     </div>
 </div>
@@ -858,6 +903,264 @@ function showStatus(id, msg, type) {
     const el = document.getElementById(id);
     el.innerHTML = `<div class="status status-${type}">${msg}</div>`;
     setTimeout(() => el.innerHTML = '', 4000);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// Tab 3: Basket decomposition
+// ─────────────────────────────────────────────────────────────────
+
+let lastBasketResults = null;
+
+function computeBasket() {
+    const tenor = document.getElementById('basket-tenor').value.trim().toUpperCase();
+    const text = document.getElementById('basket-data').value;
+
+    // Parse: pair vol rr
+    const pairs = {};
+    text.split('\n').forEach(line => {
+        line = line.trim();
+        if (!line || line.startsWith('#')) return;
+        const parts = line.replace(/,/g,' ').replace(/\t/g,' ').split(/\s+/);
+        if (parts.length < 2) return;
+        const pair = parts[0].toUpperCase();
+        const vol = parseFloat(parts[1]);
+        const rr = parts.length >= 3 ? parseFloat(parts[2]) : null;
+        if (!isNaN(vol)) pairs[pair] = { vol, rr };
+    });
+
+    // Extract all currencies
+    const ccySet = new Set();
+    Object.keys(pairs).forEach(p => {
+        ccySet.add(p.slice(0,3));
+        ccySet.add(p.slice(3,6));
+    });
+    const ccys = [...ccySet].sort();
+
+    // Basket vols: BasketVol(X) = sqrt(mean of σ²(X,j) for all j paired with X)
+    const basketVols = {};
+    ccys.forEach(ccy => {
+        const vol2s = [];
+        Object.entries(pairs).forEach(([pair, d]) => {
+            const [lhs, rhs] = [pair.slice(0,3), pair.slice(3,6)];
+            if (lhs === ccy || rhs === ccy) vol2s.push((d.vol/100)**2);
+        });
+        basketVols[ccy] = vol2s.length > 0 ? Math.sqrt(vol2s.reduce((a,b)=>a+b,0)/vol2s.length) : 0;
+    });
+
+    // Pair weights: w_LHS = BasketVar(LHS) / (BasketVar(LHS) + BasketVar(RHS))
+    function pairWeights(pair) {
+        const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
+        const bv1 = basketVols[lhs]**2, bv2 = basketVols[rhs]**2;
+        const total = bv1 + bv2;
+        return total > 0 ? [bv1/total, bv2/total] : [0.5, 0.5];
+    }
+
+    // Build linear system: for each pair with RR,
+    // observed_beta = w_LHS × β_LHS - w_RHS × β_RHS
+    const ccyIdx = {};
+    ccys.forEach((c,i) => ccyIdx[c] = i);
+    const N = ccys.length;
+
+    const A_rows = [];
+    const b_vec = [];
+    const pairList = [];
+
+    Object.entries(pairs).forEach(([pair, d]) => {
+        if (d.rr == null) return;
+        const beta = impliedBeta(d.vol, d.rr, tenor);
+        if (beta == null) return;
+        const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
+        const [wL, wR] = pairWeights(pair);
+        const row = new Array(N).fill(0);
+        row[ccyIdx[lhs]] = wL;
+        row[ccyIdx[rhs]] = -wR;
+        A_rows.push(row);
+        b_vec.push(beta);
+        pairList.push({ pair, lhs, rhs, vol: d.vol, rr: d.rr, obsBeta: beta, wL, wR });
+    });
+
+    if (A_rows.length < N) {
+        document.getElementById('basket-results').innerHTML =
+            '<div class="card" style="color:var(--red);">Not enough pairs with RR to solve for ' + N + ' currencies. Have ' + A_rows.length + ' equations.</div>';
+        return;
+    }
+
+    // Least squares: solve A × x = b
+    // Using normal equations: x = (AᵀA)⁻¹ Aᵀb
+    const AT = [];
+    for (let i = 0; i < N; i++) {
+        AT.push(A_rows.map(row => row[i]));
+    }
+    // ATA = AT × A (N×N)
+    const ATA = [];
+    for (let i = 0; i < N; i++) {
+        ATA.push([]);
+        for (let j = 0; j < N; j++) {
+            let s = 0;
+            for (let k = 0; k < A_rows.length; k++) s += AT[i][k] * A_rows[k][j];
+            ATA[i].push(s);
+        }
+    }
+    // ATb = AT × b (N×1)
+    const ATb = [];
+    for (let i = 0; i < N; i++) {
+        let s = 0;
+        for (let k = 0; k < A_rows.length; k++) s += AT[i][k] * b_vec[k];
+        ATb.push(s);
+    }
+
+    // Solve ATA × x = ATb using Gaussian elimination
+    const aug = ATA.map((row, i) => [...row, ATb[i]]);
+    for (let col = 0; col < N; col++) {
+        // Pivot
+        let maxRow = col;
+        for (let row = col+1; row < N; row++) {
+            if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+        }
+        [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+        if (Math.abs(aug[col][col]) < 1e-12) continue;
+        const pivot = aug[col][col];
+        for (let j = col; j <= N; j++) aug[col][j] /= pivot;
+        for (let row = 0; row < N; row++) {
+            if (row === col) continue;
+            const factor = aug[row][col];
+            for (let j = col; j <= N; j++) aug[row][j] -= factor * aug[col][j];
+        }
+    }
+    const ccyBetas = {};
+    ccys.forEach((c, i) => ccyBetas[c] = aug[i][N]);
+
+    // Compute predicted betas and residuals
+    pairList.forEach(p => {
+        p.predBeta = p.wL * ccyBetas[p.lhs] - p.wR * ccyBetas[p.rhs];
+        p.predRR = fairRR(p.predBeta, p.vol, tenor);
+        p.residual = p.rr != null && p.predRR != null ? p.rr - p.predRR : null;
+    });
+
+    // Sort pairs by absolute residual descending
+    pairList.sort((a,b) => Math.abs(b.residual||0) - Math.abs(a.residual||0));
+
+    lastBasketResults = { ccys, ccyBetas, basketVols, pairList, tenor };
+
+    // ── Render results ──
+    let html = '';
+
+    // Currency betas
+    html += '<div class="card"><div class="section-title">Currency Betas (' + tenor + ')</div>';
+    html += '<table class="data-table"><thead><tr>';
+    ['Currency','Basket Vol','Beta','Interpretation'].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    const sortedCcys = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
+    const maxCcyBeta = Math.max(...Object.values(ccyBetas).map(Math.abs), 0.5);
+
+    sortedCcys.forEach(ccy => {
+        const b = ccyBetas[ccy];
+        const bv = basketVols[ccy] * 100;
+        html += '<tr>';
+        html += `<td>${ccy}</td>`;
+        html += `<td>${bv.toFixed(2)}%</td>`;
+        html += td(fmtSigned(b), true, maxCcyBeta);
+        html += `<td style="color:var(--text-secondary); font-size:10px;">${ccy} strengthens 1% → vol ${b >= 0 ? 'rises' : 'falls'} ${Math.abs(b).toFixed(2)}v</td>`;
+        html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // Pair results
+    html += '<div class="card"><div class="section-title">Pair Decomposition (' + tenor + ')</div>';
+    html += '<table class="data-table"><thead><tr>';
+    ['Pair','Vol%','w LHS','w RHS','Obs β','Pred β','Obs RR%','Pred RR%','Residual'].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    const maxResid = Math.max(...pairList.map(p => Math.abs(p.residual||0)), 0.1);
+
+    pairList.forEach(p => {
+        html += '<tr>';
+        html += `<td>${p.pair}</td>`;
+        html += `<td>${p.vol.toFixed(2)}</td>`;
+        html += `<td>${p.wL.toFixed(2)}</td>`;
+        html += `<td>${p.wR.toFixed(2)}</td>`;
+        html += td(fmtSigned(p.obsBeta), true, maxCcyBeta);
+        html += td(fmtSigned(p.predBeta), true, maxCcyBeta);
+        html += td(p.rr != null ? fmtSigned(p.rr) : '—', true, 2);
+        html += td(p.predRR != null ? fmtSigned(p.predRR) : '—', true, 2);
+        html += td(p.residual != null ? fmtSigned(p.residual) : '—', true, maxResid);
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    const residuals = pairList.filter(p => p.residual != null).map(p => p.residual);
+    const rmse = Math.sqrt(residuals.reduce((s,r) => s + r*r, 0) / residuals.length);
+    html += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${rmse.toFixed(4)}% · Sorted by |residual|</div>`;
+    html += '</div>';
+
+    document.getElementById('basket-results').innerHTML = html;
+}
+
+function copyBasketEmail() {
+    if (!lastBasketResults) computeBasket();
+    const { ccys, ccyBetas, basketVols, pairList, tenor } = lastBasketResults;
+    const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+
+    function emailColor(v, maxAbs=2) {
+        if (v == null || isNaN(v) || Math.abs(v) < 0.005) return { color: '#6b7280', bg: '#ffffff' };
+        const intensity = Math.min(Math.abs(v) / maxAbs, 1.0);
+        if (v > 0) {
+            return { color: '#166534', bg: `rgb(${Math.round(240-intensity*80)},${Math.round(255-intensity*20)},${Math.round(240-intensity*80)})` };
+        } else {
+            return { color: '#991b1b', bg: `rgb(${Math.round(255-intensity*10)},${Math.round(240-intensity*80)},${Math.round(240-intensity*80)})` };
+        }
+    }
+
+    let h = `<div style="font-family: Consolas, Monaco, monospace; font-size: 12px; color: #1f2937; max-width: 900px;">`;
+    h += `<h2 style="font-size: 14px; border-bottom: 2px solid #06b6d4; padding-bottom: 6px;">BASKET BETA DECOMPOSITION (${tenor})</h2>`;
+    h += `<p style="color: #6b7280; font-size: 11px;">Generated: ${now} EST</p>`;
+
+    // Currency betas
+    h += `<h3 style="font-size: 12px; margin-top: 16px;">CURRENCY BETAS</h3>`;
+    h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
+    h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
+    ['Currency','Basket Vol','Beta'].forEach(hd => h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`);
+    h += `</tr>`;
+    const maxB = Math.max(...Object.values(ccyBetas).map(Math.abs), 0.5);
+    [...ccys].sort((a,b) => ccyBetas[a]-ccyBetas[b]).forEach(ccy => {
+        const bc = emailColor(ccyBetas[ccy], maxB);
+        h += `<tr><td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${ccy}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${(basketVols[ccy]*100).toFixed(2)}%</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color:${bc.color}; background:${bc.bg};">${fmtSigned(ccyBetas[ccy])}</td></tr>`;
+    });
+    h += `</table>`;
+
+    // Pair results
+    h += `<h3 style="font-size: 12px; margin-top: 16px;">PAIR DECOMPOSITION</h3>`;
+    h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
+    h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
+    ['Pair','Vol%','Obs RR%','Pred RR%','Residual'].forEach(hd => h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`);
+    h += `</tr>`;
+    pairList.forEach(p => {
+        const rc = emailColor(p.residual, 0.5);
+        h += `<tr>`;
+        h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${p.pair}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${p.vol.toFixed(2)}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${p.rr != null ? fmtSigned(p.rr) : '—'}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${p.predRR != null ? fmtSigned(p.predRR) : '—'}</td>`;
+        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color:${rc.color}; background:${rc.bg};">${p.residual != null ? fmtSigned(p.residual) : '—'}</td>`;
+        h += `</tr>`;
+    });
+    h += `</table>`;
+    h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">β = vol pts per 1% spot · Basket vol weighted least squares</p></div>`;
+
+    try {
+        const blob = new Blob([h], { type: 'text/html' });
+        navigator.clipboard.write([new ClipboardItem({ 'text/html': blob, 'text/plain': new Blob([h], { type: 'text/plain' }) })]).then(() => {
+            showStatus('basket-status', 'Email report copied to clipboard', 'success');
+        });
+    } catch(e) {
+        const ta = document.createElement('textarea'); ta.value = h;
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        showStatus('basket-status', 'HTML copied (fallback)', 'success');
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -650,7 +650,7 @@ function computeCross() {
     // ── Cross decomposition (dynamic leg detection) ──
     html += '<div class="card"><div class="section-title">Cross Predicted vs Market RR</div>';
     html += '<table class="data-table"><thead><tr>';
-    ['Cross','Tenor','Legs','ρ vol','β cross','Pred RR%','Mkt RR%','Residual','ρ skew'].forEach(h => html += `<th>${h}</th>`);
+    ['Cross','Tenor','Legs','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(h => html += `<th>${h}</th>`);
     html += '</tr></thead><tbody>';
 
     const crossResults = [];
@@ -699,32 +699,10 @@ function computeCross() {
             const mktRR = dc.rr;
             const residual = mktRR != null && predRR != null ? mktRR - predRR : null;
 
-            // ── ρ dislocation: what ρ would make predicted = market? ──
-            // We solve: fairRR(betaCross(ρ), crossVol, tenor) = mktRR
-            // Binary search over ρ
-            let rhoSkew = null;
-            if (mktRR != null) {
-                let lo = -0.999, hi = 0.999;
-                for (let iter = 0; iter < 60; iter++) {
-                    const mid = (lo + hi) / 2;
-                    const vw1 = (s1 + cs * mid * s2) / sc;
-                    const vw2 = (s2 + cs * mid * s1) / sc;
-                    const varC_mid = s1*s1 + s2*s2 + 2*cs*mid*s1*s2;
-                    const sw1 = (a*s1*s1 + b*mid*s1*s2) / varC_mid;
-                    const sw2 = (a*mid*s1*s2 + b*s2*s2) / varC_mid;
-                    const bc = vw1 * beta1 * sw1 + vw2 * beta2 * sw2;
-                    const pr = fairRR(bc, dc.vol, tenor);
-                    if (pr < mktRR) hi = mid; else lo = mid;
-                }
-                rhoSkew = (lo + hi) / 2;
-            }
-
             crossResults.push({
-                cross, tenor, pair1, pair2, a, b, rhoVol, rhoSkew, beta1, beta2,
+                cross, tenor, pair1, pair2, a, b, rhoVol, beta1, beta2,
                 volW1, volW2, spotW1, spotW2, betaCross, predRR, mktRR, residual
             });
-
-            const rhoDiff = rhoSkew != null ? rhoSkew - rhoVol : null;
 
             html += '<tr>';
             html += `<td>${cross}</td><td>${tenor}</td>`;
@@ -734,7 +712,6 @@ function computeCross() {
             html += td(fmtSigned(predRR), true, 2);
             html += td(mktRR != null ? fmtSigned(mktRR) : '—', true, 2);
             html += td(residual != null ? fmtSigned(residual) : '—', true, 0.5);
-            html += `<td>${rhoSkew != null ? rhoSkew.toFixed(2) : '—'}</td>`;
             html += '</tr>';
         });
     });
@@ -771,33 +748,6 @@ function computeCross() {
         });
         html += '</tbody></table></div>';
 
-        // ── ρ dislocation heatmap ──
-        const rhoMap = {};
-        let maxRhoDiff = 0;
-        crossResults.forEach(r => {
-            if (r.rhoSkew != null) {
-                const diff = r.rhoSkew - r.rhoVol;
-                rhoMap[r.cross + '|' + r.tenor] = diff;
-                maxRhoDiff = Math.max(maxRhoDiff, Math.abs(diff));
-            }
-        });
-        if (maxRhoDiff < 0.01) maxRhoDiff = 0.2;
-
-        html += '<div class="card"><div class="section-title">ρ Dislocation (ρ_skew − ρ_vol)</div>';
-        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">How much correlation needs to shift from vol-implied to match market RR</div>';
-        html += '<table class="data-table"><thead><tr><th>Cross</th>';
-        crossTenors.forEach(t => html += `<th>${t}</th>`);
-        html += '</tr></thead><tbody>';
-        crossNames.forEach(cross => {
-            html += '<tr>';
-            html += `<td>${cross}</td>`;
-            crossTenors.forEach(tenor => {
-                const v = rhoMap[cross + '|' + tenor];
-                html += v != null ? td(fmtSigned(v), true, maxRhoDiff) : '<td style="color:#484f58;">—</td>';
-            });
-            html += '</tr>';
-        });
-        html += '</tbody></table></div>';
     }
 
     document.getElementById('cross-results').innerHTML = html;
@@ -844,7 +794,7 @@ function copyEmailReport() {
     h += `<h3 style="font-size: 12px; margin-top: 16px;">CROSS RR: PREDICTED vs MARKET</h3>`;
     h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
     h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
-    ['Cross','Tenor','ρ vol','β cross','Pred RR%','Mkt RR%','Residual','ρ skew'].forEach(hd => {
+    ['Cross','Tenor','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(hd => {
         h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`;
     });
     h += `</tr>`;
@@ -861,7 +811,6 @@ function copyEmailReport() {
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${mkC.color}; background: ${mkC.bg};">${r.mktRR != null ? fmtSigned(r.mktRR) : '—'}</td>`;
         const rsC = emailColor(r.residual, 0.5);
         h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color: ${rsC.color}; background: ${rsC.bg};">${r.residual != null ? fmtSigned(r.residual) : '—'}</td>`;
-        h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.rhoSkew != null ? r.rhoSkew.toFixed(2) : '—'}</td>`;
         h += `</tr>`;
     });
     h += `</table>`;

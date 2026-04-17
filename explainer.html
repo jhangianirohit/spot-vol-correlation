@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spot-Vol Correlation — Explainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #0d1117; --bg2: #151b23; --bg3: #1c2333;
+    --text: #e5e5e5; --text2: #8b949e; --muted: #484f58;
+    --cyan: #06b6d4; --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+    --border: #21262d; --border2: #30363d;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.7;
+}
+.page { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
+
+h1 {
+    font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600;
+    color: var(--cyan); text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px;
+}
+h2 {
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+    color: var(--cyan); text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+h3 {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 500;
+    color: var(--text); text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 24px 0 12px;
+}
+.subtitle { color: var(--text2); font-size: 13px; margin-bottom: 32px; }
+
+p { margin: 12px 0; color: var(--text); }
+em { color: var(--cyan); font-style: normal; }
+
+.formula {
+    background: var(--bg2); border: 1px solid var(--border2); border-left: 3px solid var(--cyan);
+    padding: 14px 18px; margin: 16px 0; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    color: var(--text); line-height: 1.8;
+}
+
+.example {
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 14px 18px; margin: 16px 0; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text2); line-height: 1.7;
+}
+.example .label { color: var(--yellow); font-weight: 500; display: block; margin-bottom: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+.example .val { color: var(--text); }
+
+.insight {
+    background: rgba(6, 182, 212, 0.06); border: 1px solid rgba(6, 182, 212, 0.2);
+    border-left: 3px solid var(--cyan);
+    padding: 12px 16px; margin: 16px 0; border-radius: 4px;
+    font-size: 13px; color: var(--text);
+}
+.insight strong { color: var(--cyan); }
+
+table {
+    width: 100%; border-collapse: collapse; margin: 12px 0;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+}
+th {
+    background: var(--bg2); color: var(--muted); text-transform: uppercase;
+    font-size: 10px; letter-spacing: 0.06em; font-weight: 500;
+    padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border2);
+}
+th:first-child { text-align: left; }
+td {
+    padding: 5px 10px; text-align: right; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums; color: var(--text);
+}
+td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
+tr:hover td { background: rgba(6, 182, 212, 0.04); }
+
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+
+.nav { margin-bottom: 32px; }
+.nav a {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--cyan); text-decoration: none; text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.nav a:hover { text-decoration: underline; }
+
+.step-num {
+    display: inline-block; width: 24px; height: 24px; line-height: 24px;
+    text-align: center; background: var(--cyan); color: #000;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600;
+    border-radius: 50%; margin-right: 8px;
+}
+
+.footer {
+    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted);
+    letter-spacing: 0.04em;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="nav"><a href="index.html">← Back to Tool</a></div>
+
+<h1>Spot-Vol Correlation</h1>
+<div class="subtitle">A framework for understanding, decomposing, and trading FX risk reversals through the lens of spot-vol beta.</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>1. The Risk Reversal — What Are We Pricing?</h2>
+
+<p>The 25-delta risk reversal (RR) is a structure that buys a 25d call and sells a 25d put on the same notional and expiry. It is quoted as the vol differential: <em>RR = σ(25d call) − σ(25d put)</em>.</p>
+
+<p>A negative RR (e.g., −1.0%) means puts trade at higher vol than calls — the market expects vol to rise when spot falls. But what exactly determines the magnitude of the RR? That's the question this framework answers.</p>
+
+<div class="insight"><strong>Core insight:</strong> The RR is a vanna instrument. Its value comes from the expected correlation between spot and vol — the "spot-vol beta."</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>2. Vanna — The Greek That Drives the RR</h2>
+
+<p>Vanna measures how an option's vega changes when spot moves (equivalently, how delta changes when vol moves):</p>
+
+<div class="formula">
+    Vanna = ∂Vega / ∂Spot = −n(d₁) × d₂ / σ
+</div>
+
+<p>For a 25-delta call, vanna is positive: when spot rises, the call moves toward ATM and its vega increases. For a 25-delta put, vanna is negative. The RR (long call, short put) therefore has large positive net vanna.</p>
+
+<h3>The d₁ simplification</h3>
+
+<p>For 25-delta options, delta is fixed at 0.25 by definition. This means d₁ is pinned:</p>
+
+<div class="formula">
+    Δ = N(d₁) = 0.25 → d₁ = N⁻¹(0.25) = −0.6745 (call)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;d₁ = +0.6745 (put)
+</div>
+
+<p>Because d₁ is constant, n(d₁) = 0.3178 is also constant. This is key — it means the analytical vanna of 25d options depends only on d₂ and σ, and the Vanna of the RR simplifies dramatically:</p>
+
+<div class="formula">
+    Vanna_RR = Vanna(call) − Vanna(put) = 2 × |d₁| × n(d₁) / σ = <em>0.4288 / σ</em>
+</div>
+
+<p>The σ√T terms from d₂ cancel in the subtraction. Vanna_RR depends only on σ — higher vol pairs have lower vanna.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>3. Beta — The Spot-Vol Sensitivity</h2>
+
+<p>We define beta as:</p>
+
+<div class="formula">
+    <em>β = vol change (in vol points) per 1% spot move</em>
+</div>
+
+<p>For example, β = −0.85 for EURUSD 1M means: if EURUSD rises 1%, ATM vol falls by 0.85 vol points (e.g., 7.70% → 6.85%).</p>
+
+<p>Negative beta is the norm for most pairs: spot down = risk-off = vol up.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>4. From Beta to Fair RR — The Vanna P&L Argument</h2>
+
+<p>If we hold the RR and spot moves, we earn vanna P&L:</p>
+
+<div class="formula">
+    Vanna P&L per step = Vanna_RR × ΔSpot × ΔVol
+</div>
+
+<p>If vol moves with spot (beta ≠ 0), then ΔVol = β × ΔSpot, and:</p>
+
+<div class="formula">
+    Vanna P&L = Vanna_RR × β × (ΔSpot)²
+</div>
+
+<p>Over the option's life, the expected total:</p>
+
+<div class="formula">
+    E[Σ Vanna P&L] = Vanna_RR × β × E[Σ(ΔSpot)²] = Vanna_RR × β × S² × σ² × T
+</div>
+
+<h3><span class="step-num">!</span> The Scaling Factor</h3>
+
+<p>The formula above assumes vanna stays constant. But after spot moves, the strikes are no longer at 25-delta — vanna changes. We tested this with Monte Carlo (200k paths) and found that the <em>expected vanna over the option's life ≈ 50% of inception vanna</em>. This ~0.5 scaling factor is remarkably stable across tenors and vol levels.</p>
+
+<div class="formula">
+    E[Vanna P&L] ≈ <em>0.5</em> × Vanna_RR × β × S² × σ² × T
+</div>
+
+<h3>Converting P&L to Vol Premium</h3>
+
+<p>The fair RR is the vol premium where the cost of paying the skew equals the expected vanna P&L:</p>
+
+<div class="formula">
+    avg_vega × RR = E[Vanna P&L]<br>
+    RR = 0.5 × (Vanna_RR / avg_vega) × β × S² × σ² × T
+</div>
+
+<p>Now substitute Vanna_RR = 0.4288/σ and avg_vega = S × 0.3178 × √T:</p>
+
+<div class="formula">
+    Vanna_RR / avg_vega = 0.4288 / (σ × S × 0.3178 × √T) = 1.349 / (S × σ × √T)
+</div>
+
+<p>After cancellation, everything collapses to:</p>
+
+<div class="formula" style="font-size: 16px; text-align: center; padding: 20px;">
+    <em>β ≈ 1.48 × RR / (ATM × √T)</em>
+</div>
+
+<p>Where β is in vol points per 1% spot, RR and ATM are both in %, and T is in years. The constant 1.48 = 1/(2 × 0.5 × 0.6745).</p>
+
+<div class="example">
+    <span class="label">Worked Example: EURUSD 1M</span>
+    ATM vol = 7.70%, RR = −1.26%, T = 30/365<br><br>
+    <span class="val">β = 1.48 × (−1.26) / (7.70 × √(30/365))</span><br>
+    <span class="val">&nbsp; = 1.48 × (−1.26) / (7.70 × 0.287)</span><br>
+    <span class="val">&nbsp; = 1.48 × (−1.26) / 2.208</span><br>
+    <span class="val">&nbsp; = <em>−0.85</em></span><br><br>
+    Meaning: EURUSD rises 1% → vol falls 0.85 vol pts (7.70% → 6.85%).
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>5. The Market Maker Proof</h2>
+
+<p>We verified the formula with a Monte Carlo simulation:</p>
+
+<p><span class="step-num">1</span> Price the RR at the model skew (call at ATM + RR/2, put at ATM − RR/2)</p>
+<p><span class="step-num">2</span> Simulate 200k spot paths where vol moves by β × spot return each day</p>
+<p><span class="step-num">3</span> Delta hedge daily, mark to market at each step</p>
+<p><span class="step-num">4</span> Measure: does the vanna P&L earned through hedging equal the skew premium paid?</p>
+
+<div class="insight"><strong>Result:</strong> Net P&L / Skew premium ≈ −0.03 across all betas (−3 to +3). The market maker breaks even to within 3%. The RR price correctly reflects the beta.</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>6. Cross-Sectional Comparability — RR/ATM</h2>
+
+<p>From the formula β = 1.48 × RR / (ATM × √T), two pairs with the same RR/ATM ratio at the same tenor have identical betas, regardless of vol level.</p>
+
+<p>This works because vanna scales as 1/σ — higher vol pairs have lower vanna per unit notional, which exactly offsets the higher vol's contribution to quadratic variation. So RR/ATM is the sufficient statistic for cross-pair comparison.</p>
+
+<table>
+    <thead><tr><th>Pair</th><th>ATM</th><th>RR</th><th>RR/ATM</th><th>Beta</th></tr></thead>
+    <tbody>
+        <tr><td>EURUSD</td><td>7.70%</td><td>−1.26%</td><td>−0.164</td><td>−0.85</td></tr>
+        <tr><td>AUDUSD</td><td>10.50%</td><td>−1.72%</td><td>−0.164</td><td>−0.85</td></tr>
+    </tbody>
+</table>
+
+<p>Same RR/ATM → same beta. The vol level doesn't matter.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>7. Cross-Pair Decomposition — The USD Approach</h2>
+
+<p>Can we predict a cross pair's RR from the USD pair RRs? For example, EURCNH from EURUSD and USDCNH?</p>
+
+<p>The approach: EURCNH = EURUSD × USDCNH. When EURCNH moves 1%:</p>
+
+<p><span class="step-num">1</span> <strong>How much does each USD pair move?</strong> (spot decomposition via regression)</p>
+<p><span class="step-num">2</span> <strong>How does each USD pair's vol respond?</strong> (the USD pair betas)</p>
+<p><span class="step-num">3</span> <strong>How do the vol changes combine into EURCNH vol?</strong> (vol sensitivities ∂σ_cross/∂σ_leg)</p>
+
+<div class="formula">
+    β(cross) = vol_w₁ × β₁ × spot_w₁ + vol_w₂ × β₂ × spot_w₂
+</div>
+
+<p>Where vol weights come from ∂σ_cross/∂σ_leg and spot weights from Cov(leg, cross)/Var(cross).</p>
+
+<h3>The Problem</h3>
+
+<p>This approach routes everything through USD. For GBPAUD with high GBPUSD/AUDUSD correlation (ρ = 0.66), the model attributed <em>99.9%</em> of the cross beta to AUDUSD and only 0.1% to GBPUSD. GBP's contribution was nearly invisible because GBPUSD movements were almost entirely "explained" by AUDUSD through the correlation.</p>
+
+<p>Result: the USD model predicted GBPAUD RR = +0.52%, but the market was +0.19%. The model couldn't see GBP-specific skew dynamics.</p>
+
+<div class="insight"><strong>Limitation:</strong> The USD-only approach assumes constant correlation and decomposes everything through USD. It misses currency-specific skew dynamics that don't show up in the USD pair alone.</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>8. The Basket Approach — Currency-Level Betas</h2>
+
+<p>Instead of routing through USD, we assign each currency its own beta — estimated from ALL pairs involving that currency simultaneously.</p>
+
+<h3>Step 1: Basket Volatility</h3>
+
+<p>Each currency's "basket vol" measures how volatile it is across all its pairs:</p>
+
+<div class="formula">
+    BasketVol(X) = √(mean of σ²(X,j) for all j paired with X)
+</div>
+
+<div class="example">
+    <span class="label">Example</span>
+    EUR appears in EURUSD (7.53%), EURJPY (10.80%), EURGBP (5.20%), EURCNH (6.38%)<br>
+    <span class="val">BasketVol(EUR) = √((7.53² + 10.80² + 5.20² + 6.38²) / 4) = 7.76%</span>
+</div>
+
+<h3>Step 2: Pair Weight Decomposition</h3>
+
+<p>For each pair, decompose its variance into contributions from each currency:</p>
+
+<div class="formula">
+    w_LHS = BasketVar(LHS) / (BasketVar(LHS) + BasketVar(RHS))<br>
+    w_RHS = BasketVar(RHS) / (BasketVar(LHS) + BasketVar(RHS))
+</div>
+
+<div class="example">
+    <span class="label">GBPAUD weights</span>
+    BasketVol(GBP) = 8.12%, BasketVol(AUD) = 9.40%<br>
+    <span class="val">w_GBP = 8.12² / (8.12² + 9.40²) = 65.9 / 154.3 = 0.43</span><br>
+    <span class="val">w_AUD = 9.40² / (8.12² + 9.40²) = 88.4 / 154.3 = 0.57</span>
+</div>
+
+<p>Compare to the USD-only model where GBP had only 0.1% weight — the basket approach gives GBP 43%.</p>
+
+<h3>Step 3: The Model</h3>
+
+<p>Each pair's beta is a weighted combination of its two currencies' betas:</p>
+
+<div class="formula">
+    β(pair_AB) = w_A × β_A − w_B × β_B
+</div>
+
+<p>When pair AB goes up (A strengthens, B weakens), the vol change is w_A times A's beta (A strengthening) minus w_B times B's beta (B weakening).</p>
+
+<h3>Step 4: Solve by Least Squares</h3>
+
+<p>Each observed pair beta gives one equation. With N currencies and M pairs (M >> N), we have an overdetermined system. Least squares finds the currency betas that minimise the total squared error across all pairs.</p>
+
+<p>We add one constraint: <em>Σ β_currencies = 0</em>, which pins the absolute level (just like FX rates — only differences are observable).</p>
+
+<div class="example">
+    <span class="label">System of equations (simplified 3-currency example)</span>
+    EURUSD: 0.56 × β_EUR − 0.44 × β_USD = −0.71<br>
+    USDJPY: 0.41 × β_USD − 0.59 × β_JPY = −0.27<br>
+    EURJPY: 0.47 × β_EUR − 0.53 × β_JPY = −0.22<br>
+    Constraint: β_EUR + β_USD + β_JPY = 0<br><br>
+    <span class="val">Solution: β_EUR = −0.64, β_USD = +0.33, β_JPY = +0.31</span>
+</div>
+
+<h3>Results — Currency Betas</h3>
+
+<p>Applied to 16 pairs with 8 currencies (1M tenor):</p>
+
+<table>
+    <thead><tr><th>Currency</th><th>Beta</th><th>Interpretation</th></tr></thead>
+    <tbody>
+        <tr><td>AUD</td><td class="neg">−0.56</td><td style="text-align:left; color:var(--text2);">Risk-on: AUD strengthens → vol falls</td></tr>
+        <tr><td>EUR</td><td class="neg">−0.54</td><td style="text-align:left; color:var(--text2);">Risk-on: EUR strengthens → vol falls</td></tr>
+        <tr><td>NZD</td><td class="neg">−0.43</td><td style="text-align:left; color:var(--text2);">Risk-on</td></tr>
+        <tr><td>GBP</td><td class="neg">−0.33</td><td style="text-align:left; color:var(--text2);">Moderate risk-on</td></tr>
+        <tr><td>CHF</td><td>+0.02</td><td style="text-align:left; color:var(--text2);">Neutral</td></tr>
+        <tr><td>USD</td><td class="pos">+0.30</td><td style="text-align:left; color:var(--text2);">Safe haven: USD strengthens → vol rises</td></tr>
+        <tr><td>JPY</td><td class="pos">+0.35</td><td style="text-align:left; color:var(--text2);">Safe haven: JPY strengthens → vol rises</td></tr>
+        <tr><td>CNH</td><td class="pos">+1.20</td><td style="text-align:left; color:var(--text2);">Strong safe haven / risk-off</td></tr>
+    </tbody>
+</table>
+
+<p>These match market intuition: AUD, EUR, NZD are risk-on currencies; USD, JPY are safe havens. CHF sits in the middle.</p>
+
+<h3>Predicted vs Market RR</h3>
+
+<p>The RMSE across all 16 pairs is <em>0.24%</em>. Pairs with large residuals have genuinely pair-specific skew that can't be explained by currency-level betas — these are potential trade signals.</p>
+
+<table>
+    <thead><tr><th>Pair</th><th>Obs RR%</th><th>Pred RR%</th><th>Residual</th></tr></thead>
+    <tbody>
+        <tr><td>GBPAUD</td><td>+0.19</td><td>+0.26</td><td class="neg">−0.07</td></tr>
+        <tr><td>EURCNH</td><td>−0.65</td><td>−0.92</td><td class="pos">+0.27</td></tr>
+        <tr><td>CHFJPY</td><td>−0.71</td><td>−0.35</td><td class="neg">−0.36</td></tr>
+        <tr><td>EURUSD</td><td>−1.03</td><td>−0.60</td><td class="neg">−0.43</td></tr>
+    </tbody>
+</table>
+
+<p>CHFJPY at −0.71% vs predicted −0.35% suggests the market prices CHF/JPY-specific skew dynamics beyond what the currency betas explain — possibly the safe-haven differentiation between CHF and JPY in stress scenarios.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>9. Summary</h2>
+
+<p>The complete chain:</p>
+
+<p><span class="step-num">1</span> The RR prices spot-vol correlation (beta) through the vanna P&L mechanism</p>
+<p><span class="step-num">2</span> For 25d options, the formula simplifies to: <em>β = 1.48 × RR / (ATM × √T)</em></p>
+<p><span class="step-num">3</span> This was verified by Monte Carlo: delta-hedging an RR at the model price produces zero P&L</p>
+<p><span class="step-num">4</span> Cross-pair RR can be predicted from currency-level betas using basket vol weights</p>
+<p><span class="step-num">5</span> Least squares extracts each currency's universal beta from the full cross-section of pair RRs</p>
+<p><span class="step-num">6</span> Residuals flag pair-specific mispricings — potential trade signals</p>
+
+<div class="footer">
+    Built with Claude · <a href="index.html" style="color: var(--cyan);">Open the tool</a>
+</div>
+
+</div>
+</body>
+</html>

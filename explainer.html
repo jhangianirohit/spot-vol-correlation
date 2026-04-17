@@ -126,30 +126,82 @@ tr:hover td { background: rgba(6, 182, 212, 0.04); }
 <!-- ═══════════════════════════════════════════════════════════ -->
 <h2>2. Vanna — The Greek That Drives the RR</h2>
 
-<p>Vanna measures how an option's vega changes when spot moves (equivalently, how delta changes when vol moves):</p>
+<p>Vanna measures how an option's vega changes when spot moves (equivalently, how delta changes when vol moves).</p>
 
+<h3>Important notation</h3>
+<p>Two functions that look similar but are completely different:</p>
+<div class="formula">
+    <strong>N(x)</strong> = cumulative normal (CDF) — this gives delta. N(−0.6745) = <em>0.25</em><br>
+    <strong>n(x)</strong> = normal density (PDF) — the bell curve height. n(−0.6745) = <em>0.3178</em>
+</div>
+<p>The vanna formula uses the <em>density</em> n (small n), not the CDF N (big N).</p>
+
+<h3>The vanna formula</h3>
 <div class="formula">
     Vanna = ∂Vega / ∂Spot = −n(d₁) × d₂ / σ
 </div>
 
 <p>For a 25-delta call, vanna is positive: when spot rises, the call moves toward ATM and its vega increases. For a 25-delta put, vanna is negative. The RR (long call, short put) therefore has large positive net vanna.</p>
 
-<h3>The d₁ simplification</h3>
+<h3>Worked example — EURUSD 3M 25d Call, 100 mio EUR</h3>
 
-<p>For 25-delta options, delta is fixed at 0.25 by definition. This means d₁ is pinned:</p>
-
-<div class="formula">
-    Δ = N(d₁) = 0.25 → d₁ = N⁻¹(0.25) = −0.6745 (call)<br>
-    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;d₁ = +0.6745 (put)
+<div class="example">
+    <span class="label">Setup</span>
+    Spot = 1.1415, ATM vol = 7.25%, T = 91 days, Notional = 100 mio EUR<br>
+    25d call strike = 1.1705 (+290 pips from spot)
 </div>
 
-<p>Because d₁ is constant, n(d₁) = 0.3178 is also constant. This is key — it means the analytical vanna of 25d options depends only on d₂ and σ, and the Vanna of the RR simplifies dramatically:</p>
-
+<p><strong>Step 1: Find d₁ and d₂</strong></p>
+<p>For a 25-delta call, d₁ is fixed by the delta condition:</p>
 <div class="formula">
-    Vanna_RR = Vanna(call) − Vanna(put) = 2 × |d₁| × n(d₁) / σ = <em>0.4288 / σ</em>
+    Δ = N(d₁) = 0.25 → d₁ = N⁻¹(0.25) = <em>−0.6745</em><br><br>
+    d₂ = d₁ − σ√T = −0.6745 − 0.0725 × √(91/365) = −0.6745 − 0.0362 = <em>−0.7107</em>
 </div>
 
-<p>The σ√T terms from d₂ cancel in the subtraction. Vanna_RR depends only on σ — higher vol pairs have lower vanna.</p>
+<p><strong>Step 2: Compute vega</strong></p>
+<div class="formula">
+    Vega = S × n(d₁) × √T = 1.1415 × 0.3178 × √(91/365) = 0.1811 per unit σ, per unit notional
+</div>
+<p>For 100 mio, per 1 vol point (1 vol pt = 0.01 in sigma):</p>
+<div class="formula">
+    Vega = 0.1811 × 0.01 × 100,000,000 = <em>$181,122 per vol point</em>
+</div>
+<p>Meaning: if vol moves from 7.25% to 8.25% (+1 vol pt), the option gains $181,122.</p>
+
+<p><strong>Step 3: Compute vanna</strong></p>
+<div class="formula">
+    Vanna = −n(d₁) × d₂ / σ = −0.3178 × (−0.7107) / 0.0725 = <em>+3.115</em> per unit S, per unit σ
+</div>
+<p>To convert to "per 1% spot move, per 1 vol point, for 100 mio":</p>
+<div class="formula">
+    Vanna$ = 3.115 × 0.01 × S × 0.01 × Notional<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 3.115 × 0.01 × 1.1415 × 0.01 × 100,000,000<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <em>$35,558 per vol pt per 1% spot</em>
+</div>
+
+<div class="insight"><strong>In plain English:</strong> If EURUSD rises 1% (from 1.1415 to 1.1529), the option's vega increases by $35,558. It goes from $181,122 to $216,680 per vol point. Why? The call was 25-delta (290 pips OTM). After spot rises 1% (114 pips), it's closer to ATM, so it has more vol exposure.</div>
+
+<h3>Why the vanna of the 25d RR simplifies</h3>
+
+<p>For the RR (call − put), the individual vannas are:</p>
+<div class="formula">
+    Vanna(call) = −n(d₁) × d₂_call / σ = −n(d₁) × (d₁_call − σ√T) / σ<br>
+    Vanna(put)&nbsp; = −n(d₁) × d₂_put&nbsp; / σ = −n(d₁) × (d₁_put&nbsp; − σ√T) / σ
+</div>
+
+<p>Subtracting:</p>
+<div class="formula">
+    Vanna_RR = −n(d₁)/σ × [(d₁_call − σ√T) − (d₁_put − σ√T)]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= −n(d₁)/σ × [d₁_call − d₁_put]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ the σ√T cancels!<br><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= −n(d₁)/σ × [(−0.6745) − (+0.6745)]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= −n(d₁)/σ × (−1.3490)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 2 × |d₁| × n(d₁) / σ<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 2 × 0.6745 × 0.3178 / σ<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <em>0.4288 / σ</em>
+</div>
+
+<p>The σ√T terms from d₂ cancel in the subtraction. The dollar vanna of the RR is nearly constant across tenors (it varies only slightly through d₂). What changes dramatically is <em>vega</em> (which scales with √T), so the vanna-to-vega ratio — which is what determines the RR — depends on tenor. The formula accounts for this through the √T term.</p>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <h2>3. Beta — The Spot-Vol Sensitivity</h2>

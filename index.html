@@ -387,9 +387,9 @@ EURGBP	3M	5.00	-0.15</textarea>
     <div class="two-col">
         <div>
             <div class="card">
-                <div class="section-title">All Vols &amp; RRs (single tenor)</div>
+                <div class="section-title">All Vols, RRs &amp; BFs (single tenor)</div>
                 <div style="margin-bottom:6px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.04em;">
-                    Pair Vol(%) RR(%) · Include USD pairs AND crosses · One tenor
+                    Pair Vol(%) RR(%) BF(%) · BF column optional · One tenor
                 </div>
                 <div class="input-row">
                     <div class="input-group">
@@ -397,22 +397,22 @@ EURGBP	3M	5.00	-0.15</textarea>
                         <input id="basket-tenor" value="1M" style="width:80px;">
                     </div>
                 </div>
-                <textarea id="basket-data" class="data-input" rows="22">EURUSD	7.53	-1.03
-USDJPY	8.81	-0.46
-GBPUSD	6.92	-0.69
-AUDUSD	10.07	-0.98
-USDCHF	8.12	-0.04
-USDCNH	3.55	-0.25
-NZDUSD	10.20	-0.85
-EURJPY	10.80	-0.45
-EURGBP	5.20	-0.25
-EURCNH	6.38	-0.65
-GBPJPY	11.50	-0.55
-GBPAUD	7.54	+0.19
-AUDJPY	12.20	-0.90
-AUDNZD	6.80	-0.10
-CHFJPY	8.43	-0.71
-NZDJPY	12.80	-0.95</textarea>
+                <textarea id="basket-data" class="data-input" rows="22">EURUSD	7.53	-1.03	0.18
+USDJPY	8.81	-0.46	0.24
+GBPUSD	6.92	-0.69	0.14
+AUDUSD	10.07	-0.98	0.28
+USDCHF	8.12	-0.04	0.20
+USDCNH	3.55	-0.25	0.08
+NZDUSD	10.20	-0.85	0.30
+EURJPY	10.80	-0.45	0.30
+EURGBP	5.20	-0.25	0.10
+EURCNH	6.38	-0.65	0.12
+GBPJPY	11.50	-0.55	0.32
+GBPAUD	7.54	+0.19	0.16
+AUDJPY	12.20	-0.90	0.38
+AUDNZD	6.80	-0.10	0.12
+CHFJPY	8.43	-0.71	0.22
+NZDJPY	12.80	-0.95	0.40</textarea>
                 <div class="btn-row">
                     <button class="btn" onclick="computeBasket()">Calculate</button>
                     <button class="btn" onclick="copyBasketEmail()">Copy Email Report</button>
@@ -444,6 +444,23 @@ const TENOR_RANK = {};
 TENOR_ORDER.forEach((t,i) => TENOR_RANK[t] = i);
 
 const BETA_CONST = 1.4826;
+const BF_CONSTANT = 0.075; // 0.5 × 0.337 × 0.9098 × 0.5
+
+function impliedNuLog(bf, atm, T) {
+    // bf and atm in same units (both %)
+    if (!T || atm <= 0 || bf <= 0) return null;
+    return Math.sqrt(bf / (BF_CONSTANT * atm * T));
+}
+
+function fairBF(nuLog, atm, T) {
+    if (!T) return null;
+    return BF_CONSTANT * atm * T * nuLog * nuLog;
+}
+
+function dailyVolStdev(atm_pct, nuLog) {
+    // Daily 1σ vol move in vol points
+    return atm_pct * nuLog / Math.sqrt(252);
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Core math
@@ -916,7 +933,7 @@ function computeBasket() {
     const tenor = document.getElementById('basket-tenor').value.trim().toUpperCase();
     const text = document.getElementById('basket-data').value;
 
-    // Parse: pair vol rr
+    // Parse: pair vol rr [bf]
     const pairs = {};
     text.split('\n').forEach(line => {
         line = line.trim();
@@ -926,7 +943,8 @@ function computeBasket() {
         const pair = parts[0].toUpperCase();
         const vol = parseFloat(parts[1]);
         const rr = parts.length >= 3 ? parseFloat(parts[2]) : null;
-        if (!isNaN(vol)) pairs[pair] = { vol, rr };
+        const bf = parts.length >= 4 ? parseFloat(parts[3]) : null;
+        if (!isNaN(vol)) pairs[pair] = { vol, rr, bf: (bf != null && !isNaN(bf) && bf > 0) ? bf : null };
     });
 
     // Extract all currencies
@@ -977,7 +995,8 @@ function computeBasket() {
         row[ccyIdx[rhs]] = -wR;
         A_rows.push(row);
         b_vec.push(beta);
-        pairList.push({ pair, lhs, rhs, vol: d.vol, rr: d.rr, obsBeta: beta, wL, wR });
+        const obsNu = d.bf != null ? impliedNuLog(d.bf, d.vol, tenorToT(tenor)) : null;
+        pairList.push({ pair, lhs, rhs, vol: d.vol, rr: d.rr, bf: d.bf, obsBeta: beta, obsNu, wL, wR });
     });
 
     if (A_rows.length < N) {
@@ -1099,6 +1118,142 @@ function computeBasket() {
     const rmse = Math.sqrt(residuals.reduce((s,r) => s + r*r, 0) / residuals.length);
     html += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${rmse.toFixed(4)}% · Sorted by |residual|</div>`;
     html += '</div>';
+
+    // ═══════════ ν_log BASKET SOLVE ═══════════
+    // For each pair: ν²_obs = w_L² × ν_L² + w_R² × ν_R²  (ρ_vol=0)
+    const hasBF = pairList.some(p => p.obsNu != null);
+    if (hasBF) {
+        const nu_rows = [];
+        const nu_b = [];
+        const nuPairs = [];
+
+        pairList.forEach(p => {
+            if (p.obsNu == null) return;
+            const row = new Array(N).fill(0);
+            row[ccyIdx[p.lhs]] = p.wL * p.wL;
+            row[ccyIdx[p.rhs]] = p.wR * p.wR;
+            nu_rows.push(row);
+            nu_b.push(p.obsNu * p.obsNu);
+            nuPairs.push(p);
+        });
+
+        if (nu_rows.length >= N) {
+            // Non-negative least squares via iterative projection
+            // Solve A × ν² = b where ν² >= 0
+            let nu2 = new Array(N).fill(1.0); // initial guess
+            for (let iter = 0; iter < 200; iter++) {
+                // Gradient: AT(Ax - b)
+                const Ax = nu_rows.map(row => row.reduce((s,v,j) => s + v * nu2[j], 0));
+                const grad = new Array(N).fill(0);
+                for (let i = 0; i < N; i++) {
+                    for (let k = 0; k < nu_rows.length; k++) {
+                        grad[i] += nu_rows[k][i] * (Ax[k] - nu_b[k]);
+                    }
+                }
+                const step = 0.001;
+                for (let i = 0; i < N; i++) {
+                    nu2[i] = Math.max(0, nu2[i] - step * grad[i]);
+                }
+            }
+
+            const ccyNu = {};
+            ccys.forEach((c, i) => ccyNu[c] = Math.sqrt(nu2[i]));
+
+            // Predicted ν and BF for each pair
+            nuPairs.forEach(p => {
+                const nuL = ccyNu[p.lhs] || 0;
+                const nuR = ccyNu[p.rhs] || 0;
+                const predNu2 = p.wL*p.wL*nuL*nuL + p.wR*p.wR*nuR*nuR;
+                p.predNu = Math.sqrt(predNu2);
+                p.predBF = fairBF(p.predNu, p.vol, tenorToT(tenor));
+                p.residualBF = p.bf - p.predBF;
+            });
+
+            // Currency ν table
+            html += '<div class="card"><div class="section-title">Currency ν_log — Vol-of-Vol (' + tenor + ')</div>';
+            html += '<table class="data-table"><thead><tr>';
+            ['Currency','Basket Vol','ν_log','Daily σ move','Interpretation'].forEach(h => html += `<th>${h}</th>`);
+            html += '</tr></thead><tbody>';
+
+            const sortedNu = [...ccys].sort((a,b) => (ccyNu[b]||0) - (ccyNu[a]||0));
+            const maxNu = Math.max(...Object.values(ccyNu), 1);
+
+            sortedNu.forEach(ccy => {
+                const nu = ccyNu[ccy] || 0;
+                const bv = basketVols[ccy] * 100;
+                const daily = dailyVolStdev(bv, nu);
+                html += '<tr>';
+                html += `<td>${ccy}</td>`;
+                html += `<td>${bv.toFixed(2)}%</td>`;
+                html += td(nu.toFixed(2), true, maxNu);
+                html += `<td>${daily.toFixed(2)}v/day</td>`;
+                html += `<td style="color:var(--text-secondary); font-size:10px;">Daily 1σ vol move ≈ ${daily.toFixed(2)} vol pts</td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+
+            // BF pair results
+            html += '<div class="card"><div class="section-title">BF Decomposition (' + tenor + ')</div>';
+            html += '<table class="data-table"><thead><tr>';
+            ['Pair','Vol%','BF%','Obs ν','Pred ν','Pred BF%','Resid BF'].forEach(h => html += `<th>${h}</th>`);
+            html += '</tr></thead><tbody>';
+
+            nuPairs.sort((a,b) => Math.abs(b.residualBF||0) - Math.abs(a.residualBF||0));
+            const maxResBF = Math.max(...nuPairs.map(p => Math.abs(p.residualBF||0)), 0.01);
+
+            nuPairs.forEach(p => {
+                html += '<tr>';
+                html += `<td>${p.pair}</td>`;
+                html += `<td>${p.vol.toFixed(2)}</td>`;
+                html += `<td>${p.bf.toFixed(2)}</td>`;
+                html += `<td>${p.obsNu.toFixed(2)}</td>`;
+                html += `<td>${p.predNu.toFixed(2)}</td>`;
+                html += `<td>${p.predBF.toFixed(2)}</td>`;
+                html += td(fmtSigned(p.residualBF), true, maxResBF);
+                html += '</tr>';
+            });
+
+            const bfResids = nuPairs.map(p => p.residualBF);
+            const bfRmse = Math.sqrt(bfResids.reduce((s,r) => s + r*r, 0) / bfResids.length);
+            html += '</tbody></table>';
+            html += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${bfRmse.toFixed(4)}%</div>`;
+            html += '</div>';
+
+            // 2D residual analysis
+            const dualPairs = pairList.filter(p => p.residual != null && p.obsNu != null);
+            if (dualPairs.length > 0) {
+                // Match up BF residuals
+                const bfResMap = {};
+                nuPairs.forEach(p => bfResMap[p.pair] = p.residualBF);
+
+                html += '<div class="card"><div class="section-title">2D Residual: β vs ν (' + tenor + ')</div>';
+                html += '<table class="data-table"><thead><tr>';
+                ['Pair','RR Resid','BF Resid','Quadrant'].forEach(h => html += `<th>${h}</th>`);
+                html += '</tr></thead><tbody>';
+
+                dualPairs.forEach(p => {
+                    const rrRes = p.residual;
+                    const bfRes = bfResMap[p.pair] || 0;
+                    let quad = '';
+                    if (rrRes < -0.05 && bfRes < -0.01) quad = 'Skew rich / VoV rich';
+                    else if (rrRes < -0.05 && bfRes > 0.01) quad = 'Skew rich / VoV cheap';
+                    else if (rrRes > 0.05 && bfRes < -0.01) quad = 'Skew cheap / VoV rich';
+                    else if (rrRes > 0.05 && bfRes > 0.01) quad = 'Skew cheap / VoV cheap';
+                    else quad = 'Neutral';
+
+                    html += '<tr>';
+                    html += `<td>${p.pair}</td>`;
+                    html += td(fmtSigned(rrRes), true, maxResid);
+                    html += td(fmtSigned(bfRes), true, maxResBF);
+                    html += `<td style="color:var(--text-secondary); font-size:10px;">${quad}</td>`;
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+            }
+
+            lastBasketResults.ccyNu = ccyNu;
+        }
+    }
 
     document.getElementById('basket-results').innerHTML = html;
 }

@@ -1252,31 +1252,76 @@ function computeBasket() {
             });
             html += '</tbody></table></div>';
 
-            // BF pair results
-            html += '<div class="card"><div class="section-title">BF Decomposition (' + tenor + ')</div>';
-            html += '<table class="data-table"><thead><tr>';
-            ['Pair','Vol%','BF%','Obs ν','Pred ν','Pred BF%','Resid BF'].forEach(h => html += `<th>${h}</th>`);
-            html += '</tr></thead><tbody>';
-
+            // BF pair results — with toggle
             nuPairs.sort((a,b) => Math.abs(b.residualBF||0) - Math.abs(a.residualBF||0));
             const maxResBF = Math.max(...nuPairs.map(p => Math.abs(p.residualBF||0)), 0.01);
-
-            nuPairs.forEach(p => {
-                html += '<tr>';
-                html += `<td>${p.pair}</td>`;
-                html += `<td>${p.vol.toFixed(2)}</td>`;
-                html += `<td>${p.bf.toFixed(2)}</td>`;
-                html += `<td>${p.obsNu.toFixed(2)}</td>`;
-                html += `<td>${p.predNu.toFixed(2)}</td>`;
-                html += `<td>${p.predBF.toFixed(2)}</td>`;
-                html += td(fmtSigned(p.residualBF), true, maxResBF);
-                html += '</tr>';
-            });
-
             const bfResids = nuPairs.map(p => p.residualBF);
             const bfRmse = Math.sqrt(bfResids.reduce((s,r) => s + r*r, 0) / bfResids.length);
-            html += '</tbody></table>';
-            html += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${bfRmse.toFixed(4)}%</div>`;
+
+            function bfRow(p) {
+                let r = '<tr>';
+                r += `<td>${p.pair}</td>`;
+                r += `<td>${p.vol.toFixed(2)}</td>`;
+                r += `<td>${p.bf.toFixed(2)}</td>`;
+                r += `<td>${p.obsNu.toFixed(2)}</td>`;
+                r += `<td>${p.predNu.toFixed(2)}</td>`;
+                r += `<td>${p.predBF.toFixed(2)}</td>`;
+                r += td(fmtSigned(p.residualBF), true, maxResBF);
+                r += '</tr>';
+                return r;
+            }
+
+            function bfTableHeader() {
+                let h = '<table class="data-table"><thead><tr>';
+                ['Pair','Vol%','BF%','Obs ν','Pred ν','Pred BF%','Resid BF'].forEach(c => h += `<th>${c}</th>`);
+                h += '</tr></thead><tbody>';
+                return h;
+            }
+
+            // View 1: sorted by |residual|
+            let bfViewResid = '<div id="bf-view-resid">';
+            bfViewResid += bfTableHeader();
+            nuPairs.forEach(p => bfViewResid += bfRow(p));
+            bfViewResid += '</tbody></table>';
+            bfViewResid += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${bfRmse.toFixed(4)}% · Sorted by |residual|</div>`;
+            bfViewResid += '</div>';
+
+            // View 2: grouped by currency
+            const bfCcyPairs = {};
+            ccys.forEach(c => bfCcyPairs[c] = []);
+            nuPairs.forEach(p => {
+                bfCcyPairs[p.lhs].push(p);
+                bfCcyPairs[p.rhs].push(p);
+            });
+
+            let bfViewCcy = '<div id="bf-view-ccy" style="display:none;">';
+            const ccyNuOrder = [...ccys].filter(c => ccyNu[c] > 0).sort((a,b) => (ccyNu[b]||0) - (ccyNu[a]||0));
+            ccyNuOrder.forEach(ccy => {
+                const cp = bfCcyPairs[ccy];
+                if (!cp || cp.length === 0) return;
+                cp.sort((a,b) => Math.abs(b.residualBF||0) - Math.abs(a.residualBF||0));
+                const nu = ccyNu[ccy] || 0;
+                const bv = basketVols[ccy] * 100;
+                const daily = dailyVolStdev(bv, nu);
+                bfViewCcy += `<div style="margin-top:16px; margin-bottom:4px;">`;
+                bfViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
+                bfViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
+                bfViewCcy += `Basket Vol: ${bv.toFixed(2)}% · ν_log: ${nu.toFixed(2)} · Daily σ: ${daily.toFixed(2)}v`;
+                bfViewCcy += `</span></div>`;
+                bfViewCcy += bfTableHeader();
+                cp.forEach(p => bfViewCcy += bfRow(p));
+                bfViewCcy += '</tbody></table>';
+            });
+            bfViewCcy += '</div>';
+
+            html += '<div class="card">';
+            html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
+            html += `<div class="section-title" style="margin:0; border:none; padding:0;">BF Decomposition (${tenor})</div>`;
+            html += '<div class="btn-row" style="margin:0;">';
+            html += '<button class="btn" id="btn-bf-resid" onclick="toggleBFView(\'resid\')" style="font-size:9px; padding:4px 10px; background:var(--cyan); color:#000;">By Residual</button>';
+            html += '<button class="btn" id="btn-bf-ccy" onclick="toggleBFView(\'ccy\')" style="font-size:9px; padding:4px 10px;">By Currency</button>';
+            html += '</div></div>';
+            html += bfViewResid + bfViewCcy;
             html += '</div>';
 
             // 2D residual analysis
@@ -1316,6 +1361,25 @@ function computeBasket() {
     }
 
     document.getElementById('basket-results').innerHTML = html;
+}
+
+function toggleBFView(view) {
+    const residEl = document.getElementById('bf-view-resid');
+    const ccyEl = document.getElementById('bf-view-ccy');
+    const btnResid = document.getElementById('btn-bf-resid');
+    const btnCcy = document.getElementById('btn-bf-ccy');
+    if (!residEl || !ccyEl) return;
+    if (view === 'ccy') {
+        residEl.style.display = 'none';
+        ccyEl.style.display = 'block';
+        btnResid.style.background = 'transparent'; btnResid.style.color = 'var(--cyan)';
+        btnCcy.style.background = 'var(--cyan)'; btnCcy.style.color = '#000';
+    } else {
+        residEl.style.display = 'block';
+        ccyEl.style.display = 'none';
+        btnResid.style.background = 'var(--cyan)'; btnResid.style.color = '#000';
+        btnCcy.style.background = 'transparent'; btnCcy.style.color = 'var(--cyan)';
+    }
 }
 
 function toggleBasketView(view) {

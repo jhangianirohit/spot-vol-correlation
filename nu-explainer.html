@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vol-of-Vol — Explainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg: #0d1117; --bg2: #151b23; --bg3: #1c2333;
+    --text: #e5e5e5; --text2: #8b949e; --muted: #484f58;
+    --cyan: #06b6d4; --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+    --border: #21262d; --border2: #30363d;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.7;
+}
+.page { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
+h1 {
+    font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600;
+    color: var(--cyan); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;
+}
+h2 {
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
+    color: var(--cyan); text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+h3 {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 500;
+    color: var(--text); text-transform: uppercase; letter-spacing: 0.06em; margin: 24px 0 12px;
+}
+.subtitle { color: var(--text2); font-size: 13px; margin-bottom: 32px; }
+p { margin: 12px 0; color: var(--text); }
+em { color: var(--cyan); font-style: normal; }
+.formula {
+    background: var(--bg2); border: 1px solid var(--border2); border-left: 3px solid var(--cyan);
+    padding: 14px 18px; margin: 16px 0; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); line-height: 1.8;
+}
+.example {
+    background: var(--bg3); border: 1px solid var(--border);
+    padding: 14px 18px; margin: 16px 0; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text2); line-height: 1.7;
+}
+.example .label { color: var(--yellow); font-weight: 500; display: block; margin-bottom: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+.example .val { color: var(--text); }
+.insight {
+    background: rgba(6, 182, 212, 0.06); border: 1px solid rgba(6, 182, 212, 0.2);
+    border-left: 3px solid var(--cyan);
+    padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 13px; color: var(--text);
+}
+.insight strong { color: var(--cyan); }
+table {
+    width: 100%; border-collapse: collapse; margin: 12px 0;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+}
+th {
+    background: var(--bg2); color: var(--muted); text-transform: uppercase;
+    font-size: 10px; letter-spacing: 0.06em; font-weight: 500;
+    padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border2);
+}
+th:first-child { text-align: left; }
+td {
+    padding: 5px 10px; text-align: right; border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums; color: var(--text);
+}
+td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
+.step-num {
+    display: inline-block; width: 24px; height: 24px; line-height: 24px;
+    text-align: center; background: var(--cyan); color: #000;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600;
+    border-radius: 50%; margin-right: 8px;
+}
+.nav { margin-bottom: 32px; }
+.nav a {
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    color: var(--cyan); text-decoration: none; text-transform: uppercase; letter-spacing: 0.06em;
+    margin-right: 16px;
+}
+.nav a:hover { text-decoration: underline; }
+.footer {
+    margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); letter-spacing: 0.04em;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="nav">
+    <a href="index.html">← Tool</a>
+    <a href="explainer.html">RR / β Explainer</a>
+</div>
+
+<h1>Vol-of-Vol (ν_log)</h1>
+<div class="subtitle">Extracting implied vol-of-vol from the 25-delta butterfly, mirroring the RR / β framework.</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>1. The Butterfly — What Is It Pricing?</h2>
+
+<p>The 25-delta butterfly (BF) is the vol premium of the wings over ATM:</p>
+
+<div class="formula">
+    BF = ½ × (σ_25d_call + σ_25d_put) − σ_ATM
+</div>
+
+<p>BF is always positive — the wings trade at higher vol than ATM. Why? Because options at 25-delta have exposure to <em>vol-of-vol</em>: if vol moves around during the option's life, the wings benefit more than ATM.</p>
+
+<p>If the RR is a <em>vanna</em> instrument (pricing spot-vol correlation), the BF is a <em>volga</em> instrument (pricing vol-of-vol).</p>
+
+<div class="insight"><strong>Core insight:</strong> The BF prices how much vol moves around — the volatility of volatility. Just as RR → β (spot-vol beta), BF → ν_log (vol-of-vol).</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>2. Volga — The Greek That Drives the BF</h2>
+
+<p>Volga measures how an option's vega changes when vol moves:</p>
+
+<div class="formula">
+    Volga = ∂Vega / ∂σ = Vega × d₁ × d₂ / σ
+</div>
+
+<p>For ATM options: d₁ ≈ 0, so d₁ × d₂ ≈ 0 — ATM has near-zero volga. Vol moving doesn't change ATM's vega much.</p>
+
+<p>For 25-delta options: |d₁| ≈ 0.67, |d₂| ≈ 0.67–0.70 — both are significantly non-zero, so the wings have substantial positive volga. When vol rises, the wings pick up more vega (they move closer to ATM). When vol falls, they lose vega.</p>
+
+<p>The BF structure (long wings, short ATM) therefore has large positive volga. If vol moves around, the BF holder earns volga P&L:</p>
+
+<div class="formula">
+    Volga P&L per step = ½ × Volga_BF × (Δσ)²
+</div>
+
+<p>The ½ is the Taylor coefficient. Unlike vanna P&L (which depends on direction — does vol go up when spot goes up?), volga P&L depends only on the <em>magnitude</em> of vol moves. Vol up: earn. Vol down: earn. Either way, the wings benefit.</p>
+
+<h3>Volga of the 25d strangle</h3>
+
+<div class="formula">
+    Volga_call = Vega × d₁_call × d₂_call / σ<br>
+    Volga_put&nbsp; = Vega × d₁_put × d₂_put / σ<br><br>
+    Volga_strangle = Vega × (d₁_c × d₂_c + d₁_p × d₂_p) / σ
+</div>
+
+<p>For 25-delta: d₁_c × d₂_c ≈ 0.470, d₁_p × d₂_p ≈ 0.440. Sum ≈ <em>0.910</em>.</p>
+
+<div class="example">
+    <span class="label">Worked Example: EURUSD 1M, σ = 7.70%</span>
+    d₁_call = −0.6745, d₂_call = −0.6966 → d₁×d₂ = 0.470<br>
+    d₁_put  = +0.6745, d₂_put  = +0.6524 → d₁×d₂ = 0.440<br><br>
+    <span class="val">Volga_strangle = Vega × 0.910 / 0.077 = Vega × 11.8</span><br><br>
+    For 100 mio EUR: Vega = $104,000/volpt<br>
+    <span class="val">Volga = $104,000 × 11.8 = $1,228,000 per (vol pt)²</span><br><br>
+    Meaning: if vol moves by 1 vol pt (7.70% → 8.70%), the strangle's vega increases by $1.23M per vol pt. It picks up more vol exposure as vol rises.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>3. Vol-of-Vol — The ν_log Parameter</h2>
+
+<p>We model vol dynamics as lognormal:</p>
+
+<div class="formula">
+    dσ / σ = ν_log × dW
+</div>
+
+<p>This means vol moves proportionally to its level — if ATM is 10%, vol moves are larger in absolute terms than if ATM is 5%. This matches the observed behaviour that high-vol regimes have larger absolute vol swings.</p>
+
+<p>Under this model, the daily 1-sigma vol change (in vol points) is:</p>
+
+<div class="formula">
+    Daily σ stdev = σ_ATM × ν_log × √(1/252) ≈ <em>σ_ATM × ν_log / 16</em>
+</div>
+
+<div class="example">
+    <span class="label">Example</span>
+    ATM = 7.70%, ν_log = 1.95<br>
+    <span class="val">Daily σ move ≈ 7.70 × 1.95 / 16 ≈ 0.94 vol pts</span><br><br>
+    On a typical day, 1M EURUSD vol might move ±0.94 vol pts (1σ).<br>
+    That's 7.70% → 8.64% or 7.70% → 6.76%.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>4. From ν_log to Fair BF — The Volga P&L Argument</h2>
+
+<p>The logic mirrors the RR derivation exactly:</p>
+
+<p><span class="step-num">1</span> The BF holder earns volga P&L when vol moves: ½ × Volga × (Δσ)²</p>
+
+<p><span class="step-num">2</span> Under lognormal dynamics: (Δσ)² = σ² × ν² × dt per step</p>
+
+<p><span class="step-num">3</span> Over the option life, sum with a scaling factor SF ≈ 0.337 (from MC — volga decays as vol drifts from inception, similar to the 0.5 factor for vanna but smaller because volga decays faster):</p>
+
+<div class="formula">
+    E[Volga P&L] = SF × ½ × Volga_strangle × σ² × ν² × T
+</div>
+
+<p><span class="step-num">4</span> Substitute Volga_strangle = Vega × 0.910 / σ:</p>
+
+<div class="formula">
+    E[Volga P&L] = 0.337 × 0.5 × Vega × 0.910 / σ × σ² × ν² × T<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= 0.337 × 0.5 × 0.910 × Vega × σ × ν² × T
+</div>
+
+<p><span class="step-num">5</span> Set this equal to the BF premium. The BF costs approximately 2 × Vega × BF (each wing at BF extra vol):</p>
+
+<div class="formula">
+    2 × Vega × BF = 0.337 × 0.5 × 0.910 × Vega × σ × ν² × T<br><br>
+    BF = 0.337 × 0.5 × 0.910 × 0.5 × σ × ν² × T<br><br>
+    BF = <em>0.075 × σ × ν² × T</em>
+</div>
+
+<p>The constant 0.075 packs four factors:</p>
+
+<table>
+    <thead><tr><th>Factor</th><th>Value</th><th>Origin</th></tr></thead>
+    <tbody>
+        <tr><td>Taylor coefficient</td><td>0.5</td><td>½ × Volga × (Δσ)²</td></tr>
+        <tr><td>Volga scaling (SF)</td><td>0.337</td><td>MC: expected volga over life ≈ 34% of inception</td></tr>
+        <tr><td>d₁×d₂ sum (25d)</td><td>0.910</td><td>= 0.470 + 0.440 for call + put</td></tr>
+        <tr><td>Premium normalization</td><td>0.5</td><td>Premium = 2 × Vega × BF</td></tr>
+    </tbody>
+</table>
+
+<p>Inverting to extract ν_log from market BF:</p>
+
+<div class="formula" style="font-size: 16px; text-align: center; padding: 20px;">
+    <em>ν_log = √( BF / (0.075 × ATM × T) )</em>
+</div>
+
+<p>Where BF and ATM are in the same units (both % or both decimal), T in years.</p>
+
+<div class="example">
+    <span class="label">Worked Example: EURUSD 1M</span>
+    ATM = 7.70%, BF = 0.18%, T = 30/365 = 0.0822<br><br>
+    <span class="val">ν_log = √(0.18 / (0.075 × 7.70 × 0.0822))</span><br>
+    <span class="val">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= √(0.18 / 0.0475)</span><br>
+    <span class="val">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= √3.79</span><br>
+    <span class="val">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;= <em>1.95</em></span><br><br>
+    Daily vol move ≈ 7.70 × 1.95 / 16 ≈ <em>0.94 vol pts per day</em>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>5. The Market Maker Proof</h2>
+
+<p>We verified the formula via Monte Carlo, mirroring the RR verification:</p>
+
+<p><span class="step-num">1</span> Price the vega-neutral 25d BF structure: long strangle at wing vols, short 0.797 × ATM straddle</p>
+<p><span class="step-num">2</span> Simulate 200k paths: spot moves at implied vol, vol follows dσ/σ = ν × dW (independent of spot, ρ = 0)</p>
+<p><span class="step-num">3</span> Delta hedge daily, mark to market</p>
+<p><span class="step-num">4</span> Measure: does the volga P&L equal the BF premium?</p>
+
+<div class="insight"><strong>Result:</strong> Recovery ratio = 0.90. The delta-hedged BF structure earns 90% of the premium back through volga P&L. The ~10% shortfall is the known lognormal-dispersion bias — under lognormal dynamics, vol can move very far from inception, making the quadratic volga approximation increasingly inaccurate for the paths that contribute most to the P&L.</div>
+
+<p><strong>Important subtlety:</strong> the MC must test the full vega-neutral BF (strangle minus k × straddle), not the naked strangle. The strangle alone gives ~2.0× recovery because it has positive vega exposure that generates additional P&L beyond the volga channel. The straddle hedge neutralizes this, isolating pure volga P&L.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>6. Why Lognormal?</h2>
+
+<p>We could model vol as normal (dσ = ν_norm × dW) instead of lognormal (dσ/σ = ν_log × dW). Both give the same daily vol move <em>today</em>:</p>
+
+<div class="formula">
+    Normal: daily Δσ = ν_norm / √252<br>
+    Lognormal: daily Δσ = σ × ν_log / √252<br><br>
+    Set equal today: ν_norm = σ_today × ν_log
+</div>
+
+<p>But they diverge when vol changes:</p>
+
+<table>
+    <thead><tr><th></th><th>Normal</th><th>Lognormal</th></tr></thead>
+    <tbody>
+        <tr><td>σ at 5%</td><td>Same daily moves</td><td>Smaller daily moves</td></tr>
+        <tr><td>σ at 15%</td><td>Same daily moves</td><td>Larger daily moves</td></tr>
+        <tr><td>σ can go negative?</td><td>Yes (problem)</td><td>No (stays positive)</td></tr>
+    </tbody>
+</table>
+
+<p>Lognormal matches the observed behaviour: high-vol regimes have larger absolute vol swings. It also prevents vol from going negative. This is why we use lognormal.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>7. What ν_log Absorbs</h2>
+
+<p>The BF-implied ν_log embeds more than just diffusive vol-of-vol. It also absorbs:</p>
+
+<p><strong>Jump risk premium.</strong> The BF prices tail protection — if vol can jump (e.g., on an event), the wings become more valuable. Since our model has no jumps (only diffusion), the jump premium shows up as a higher ν_log. Short-tenor BF tends to have elevated ν_log partly because of this.</p>
+
+<p><strong>Smile convexity beyond volga.</strong> The Taylor approximation (½ × Volga × Δσ²) captures the second-order effect. Higher-order terms (how volga itself changes when vol moves) contribute to the BF but aren't in our formula — they inflate the implied ν_log slightly.</p>
+
+<p>This means the implied ν_log is an <em>upper bound</em> on the true diffusive vol-of-vol. The gap between implied and realized ν_log includes the jump premium and model approximation error.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>8. Comparing RR and BF Frameworks</h2>
+
+<table>
+    <thead><tr><th></th><th>RR / β</th><th>BF / ν_log</th></tr></thead>
+    <tbody>
+        <tr><td>Prices</td><td>Spot-vol correlation</td><td>Vol-of-vol</td></tr>
+        <tr><td>Greek</td><td>Vanna</td><td>Volga</td></tr>
+        <tr><td>Formula</td><td>β = 1.48 × RR / (ATM × √T)</td><td>ν = √(BF / (0.075 × ATM × T))</td></tr>
+        <tr><td>Scaling factor</td><td>0.50 (vanna decay)</td><td>0.337 (volga decay)</td></tr>
+        <tr><td>MC recovery</td><td>~97%</td><td>~90%</td></tr>
+        <tr><td>Sign</td><td>Can be ± (directional)</td><td>Always positive (magnitude)</td></tr>
+        <tr><td>Depends on</td><td>RR, ATM, √T</td><td>BF, ATM, T</td></tr>
+    </tbody>
+</table>
+
+<p>Note the different T dependence: β scales with 1/√T (vanna P&L accumulates as √T), while ν² scales with 1/T (volga P&L accumulates linearly in T through the (Δσ)² = σ² ν² dt term).</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>9. Currency-Level ν_log Decomposition</h2>
+
+<p>Just as we decompose RR into currency betas, we decompose BF into currency-level vol-of-vols. For each pair AB:</p>
+
+<div class="formula">
+    ν²_AB = w_A² × ν_A² + w_B² × ν_B²
+</div>
+
+<p>This assumes ρ_vol = 0 (independent currency vol-of-vols) as a baseline. The weights w_A, w_B are the same basket vol weights used for β.</p>
+
+<p>Note the key difference from the β formula: β combines <em>linearly</em> (β_AB = w_A × β_A − w_B × β_B) because skew is directional. But ν combines in <em>quadrature</em> (ν² adds) because vol-of-vol is a magnitude — two independent sources of vol uncertainty add as variances.</p>
+
+<p>Solve for currency ν values via non-negative least squares (ν must be positive, unlike β which can be negative). The residuals flag pairs with excess or deficient BF relative to what the currency vol-of-vols predict.</p>
+
+<div class="example">
+    <span class="label">Results (1M, 8 currencies, 16 pairs)</span>
+    RMSE of BF residuals: 0.026% — much tighter than β residuals (0.24%).<br><br>
+    This suggests the BF surface is more internally consistent than the RR surface.<br>
+    The "cross-pair BF mispricing" signal is smaller than the RR signal.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>10. Summary</h2>
+
+<p><span class="step-num">1</span> The BF prices vol-of-vol through the volga P&L mechanism</p>
+<p><span class="step-num">2</span> For 25d options: <em>ν_log = √(BF / (0.075 × ATM × T))</em></p>
+<p><span class="step-num">3</span> Daily vol move ≈ ATM × ν_log / 16 (practical grip)</p>
+<p><span class="step-num">4</span> Verified by MC: vega-neutral BF delta-hedged → 90% premium recovery</p>
+<p><span class="step-num">5</span> Lognormal model: vol moves scale with vol level, can't go negative</p>
+<p><span class="step-num">6</span> Implied ν_log absorbs jump premium — it's an upper bound on diffusive vol-of-vol</p>
+<p><span class="step-num">7</span> Currency-level decomposition via ν² = w² × ν_ccy² (quadrature, not linear)</p>
+
+<div class="footer">
+    Built with Claude · <a href="index.html" style="color: var(--cyan);">Tool</a> · <a href="explainer.html" style="color: var(--cyan);">RR / β Explainer</a>
+</div>
+
+</div>
+</body>
+</html>

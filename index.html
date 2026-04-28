@@ -317,18 +317,18 @@ textarea.data-input:focus {
                     </div>
                 </div>
                 <div style="margin-bottom:6px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;">
-                    Tenor &nbsp; Vol(%) &nbsp; RR(%)
+                    Tenor &nbsp; Vol(%) &nbsp; RR(%) &nbsp; BF(%) optional
                 </div>
-                <textarea id="single-data" class="data-input" rows="12">ON	11.88	-2.67
-1W	9.03	-1.63
-2W	8.24	-1.47
-3W	7.88	-1.35
-1M	7.70	-1.26
-2M	7.46	1.02
-3M	7.30	-0.81
-6M	7.17	-0.34
-9M	7.16	-0.08
-1Y	7.12	0.15</textarea>
+                <textarea id="single-data" class="data-input" rows="12">ON	11.88	-2.67	0.55
+1W	9.03	-1.63	0.30
+2W	8.24	-1.47	0.22
+3W	7.88	-1.35	0.19
+1M	7.70	-1.26	0.18
+2M	7.46	1.02	0.16
+3M	7.30	-0.81	0.15
+6M	7.17	-0.34	0.13
+9M	7.16	-0.08	0.12
+1Y	7.12	0.15	0.12</textarea>
                 <div class="btn-row">
                     <button class="btn" onclick="computeSingle()">Calculate</button>
                 </div>
@@ -628,21 +628,30 @@ function computeSingle() {
         const tenor = parts[0].toUpperCase();
         const vol = parseFloat(parts[1]);
         const rr = parseFloat(parts[2]);
+        const bf = parts.length >= 4 ? parseFloat(parts[3]) : null;
         if (isNaN(vol) || isNaN(rr)) return;
         const beta = impliedBeta(vol, rr, tenor);
+        const T = tenorToT(tenor);
+        const nu = (bf != null && !isNaN(bf) && bf > 0 && T) ? impliedNuLog(bf, vol, T) : null;
+        const daily = nu != null ? dailyVolStdev(vol, nu) : null;
         if (beta !== null) {
-            results.push({ tenor, vol, rr, beta, rrAtm: rr / vol });
+            results.push({ tenor, vol, rr, bf, beta, rrAtm: rr / vol, nu, daily });
         }
     });
 
-    let html = `<div class="card"><div class="section-title">${pair} — Implied Beta</div>`;
+    const hasBF = results.some(r => r.nu != null);
+
+    // Beta table
+    let html = `<div class="card"><div class="section-title">${pair} — Implied Beta & Vol-of-Vol</div>`;
     html += '<table class="data-table"><thead><tr>';
-    ['Tenor','Vol %','RR %','Beta','RR/ATM'].forEach(h => html += `<th>${h}</th>`);
+    const headers = ['Tenor','Vol %','RR %','Beta','RR/ATM'];
+    if (hasBF) headers.push('BF %', 'ν_log', 'Daily σ');
+    headers.forEach(h => html += `<th>${h}</th>`);
     html += '</tr></thead><tbody>';
 
-    // Find max absolute beta for scaling
     const maxBeta = Math.max(...results.map(r => Math.abs(r.beta)), 1);
     const maxRR = Math.max(...results.map(r => Math.abs(r.rr)), 0.5);
+    const maxNu = hasBF ? Math.max(...results.filter(r => r.nu).map(r => r.nu), 1) : 1;
 
     results.forEach(r => {
         html += '<tr>';
@@ -651,6 +660,11 @@ function computeSingle() {
         html += td(fmtSigned(r.rr), true, maxRR);
         html += td(fmtSigned(r.beta), true, maxBeta);
         html += td(fmtSigned(r.rrAtm, 3), true, 0.3);
+        if (hasBF) {
+            html += `<td>${r.bf != null ? r.bf.toFixed(2) : '—'}</td>`;
+            html += `<td>${r.nu != null ? r.nu.toFixed(2) : '—'}</td>`;
+            html += `<td>${r.daily != null ? r.daily.toFixed(2) + 'v' : '—'}</td>`;
+        }
         html += '</tr>';
     });
 

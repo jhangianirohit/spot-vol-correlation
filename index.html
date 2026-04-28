@@ -1120,7 +1120,7 @@ function computeBasket() {
     html += '</div>';
 
     // ═══════════ ν_log BASKET SOLVE ═══════════
-    // For each pair: ν²_obs = w_L² × ν_L² + w_R² × ν_R²  (ρ_vol=0)
+    // For each pair: ν²_obs = w_L × ν_L² + w_R × ν_R²  (weighted average, ρ_vol=0)
     const hasBF = pairList.some(p => p.obsNu != null);
     if (hasBF) {
         const nu_rows = [];
@@ -1130,8 +1130,8 @@ function computeBasket() {
         pairList.forEach(p => {
             if (p.obsNu == null) return;
             const row = new Array(N).fill(0);
-            row[ccyIdx[p.lhs]] = p.wL * p.wL;
-            row[ccyIdx[p.rhs]] = p.wR * p.wR;
+            row[ccyIdx[p.lhs]] = p.wL;
+            row[ccyIdx[p.rhs]] = p.wR;
             nu_rows.push(row);
             nu_b.push(p.obsNu * p.obsNu);
             nuPairs.push(p);
@@ -1163,7 +1163,7 @@ function computeBasket() {
             nuPairs.forEach(p => {
                 const nuL = ccyNu[p.lhs] || 0;
                 const nuR = ccyNu[p.rhs] || 0;
-                const predNu2 = p.wL*p.wL*nuL*nuL + p.wR*p.wR*nuR*nuR;
+                const predNu2 = p.wL*nuL*nuL + p.wR*nuR*nuR;
                 p.predNu = Math.sqrt(predNu2);
                 p.predBF = fairBF(p.predNu, p.vol, tenorToT(tenor));
                 p.residualBF = p.bf - p.predBF;

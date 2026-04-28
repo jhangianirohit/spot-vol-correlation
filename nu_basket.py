@@ -93,8 +93,8 @@ def solve_currency_nu(pairs_data, tenor, rho_vol=0.0):
         # With ρ_vol=0: ν²_obs = w_L² × ν_L² + w_R² × ν_R²
         # This is linear in ν² values
         row = np.zeros(N)
-        row[ccy_idx[lhs]] = wL**2
-        row[ccy_idx[rhs]] = wR**2
+        row[ccy_idx[lhs]] = wL
+        row[ccy_idx[rhs]] = wR
         # If ρ_vol ≠ 0, we'd need to add cross terms (nonlinear — would need iterative solve)
         rows.append(row)
         obs_nu2.append(nu**2)
@@ -122,7 +122,7 @@ def solve_currency_nu(pairs_data, tenor, rho_vol=0.0):
         wL, wR = p['wL'], p['wR']
         nu_L = ccy_nu.get(p['lhs'], 0)
         nu_R = ccy_nu.get(p['rhs'], 0)
-        pred_nu2 = wL**2 * nu_L**2 + wR**2 * nu_R**2
+        pred_nu2 = wL * nu_L**2 + wR * nu_R**2
         pred_nu = np.sqrt(pred_nu2) if pred_nu2 > 0 else 0
         pred_bf = fair_bf(pred_nu, p['atm'], T)
         p['pred_nu'] = pred_nu

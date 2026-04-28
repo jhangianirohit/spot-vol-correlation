@@ -312,18 +312,24 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 <p>Just as we decompose RR into currency betas, we decompose BF into currency-level vol-of-vols. For each pair AB:</p>
 
 <div class="formula">
-    ν²_AB = w_A² × ν_A² + w_B² × ν_B²
+    ν²_AB = w_A × ν_A² + w_B × ν_B²
 </div>
 
-<p>This assumes ρ_vol = 0 (independent currency vol-of-vols) as a baseline. The weights w_A, w_B are the same basket vol weights used for β.</p>
+<p>This assumes ρ_vol = 0 (independent currency vol-of-vols) as a baseline. The weights w_A, w_B are the same basket vol weights used for β — <em>not squared</em>.</p>
 
-<p>Note the key difference from the β formula: β combines <em>linearly</em> (β_AB = w_A × β_A − w_B × β_B) because skew is directional. But ν combines in <em>quadrature</em> (ν² adds) because vol-of-vol is a magnitude — two independent sources of vol uncertainty add as variances.</p>
+<h3>Why weighted average, not portfolio variance?</h3>
 
-<p>Solve for currency ν values via non-negative least squares (ν must be positive, unlike β which can be negative). The residuals flag pairs with excess or deficient BF relative to what the currency vol-of-vols predict.</p>
+<p>An earlier version used w² weights (the portfolio variance formula: Var(wX) = w²Var(X)). This systematically underpredicted every pair's BF because w_A² + w_B² < 1 when w_A + w_B = 1. For example, a 50/50 pair would have predicted ν² = 0.25ν_A² + 0.25ν_B² — only half the average.</p>
+
+<p>The correct formula is a <em>weighted average</em> of ν² values. The pair's vol-of-vol² is a blend of each currency's vol-of-vol², weighted by how much each currency drives the pair. If a pair is 70% driven by AUD and 30% by GBP, its ν² should be 70% of AUD's ν² + 30% of GBP's ν² — not 49% + 9%.</p>
+
+<div class="insight"><strong>Comparison with β:</strong> Both use the same generic basket weights w_A, w_B. β combines them linearly (β = w_A × β_A − w_B × β_B) because skew is directional. ν² combines them as a weighted average (ν² = w_A × ν_A² + w_B × ν_B²) because vol-of-vol is a magnitude — each currency contributes proportionally to the pair's vol uncertainty.</div>
+
+<p>Solve for currency ν² values via non-negative least squares (ν must be positive, unlike β which can be negative). The residuals flag pairs with excess or deficient BF relative to what the currency vol-of-vols predict.</p>
 
 <div class="example">
     <span class="label">Results (1M, 8 currencies, 16 pairs)</span>
-    RMSE of BF residuals: 0.026% — much tighter than β residuals (0.24%).<br><br>
+    RMSE of BF residuals: 0.022% — much tighter than β residuals (0.24%).<br><br>
     This suggests the BF surface is more internally consistent than the RR surface.<br>
     The "cross-pair BF mispricing" signal is smaller than the RR signal.
 </div>
@@ -337,7 +343,7 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 <p><span class="step-num">4</span> Verified by MC: vega-neutral BF delta-hedged → 90% premium recovery</p>
 <p><span class="step-num">5</span> Lognormal model: vol moves scale with vol level, can't go negative</p>
 <p><span class="step-num">6</span> Implied ν_log absorbs jump premium — it's an upper bound on diffusive vol-of-vol</p>
-<p><span class="step-num">7</span> Currency-level decomposition via ν² = w² × ν_ccy² (quadrature, not linear)</p>
+<p><span class="step-num">7</span> Currency-level decomposition via ν² = w × ν_ccy² (weighted average, not quadrature)</p>
 
 <div class="footer">
     Built with Claude · <a href="index.html" style="color: var(--cyan);">Tool</a> · <a href="explainer.html" style="color: var(--cyan);">RR / β Explainer</a>

@@ -1258,14 +1258,17 @@ function computeBasket() {
             const bfResids = nuPairs.map(p => p.residualBF);
             const bfRmse = Math.sqrt(bfResids.reduce((s,r) => s + r*r, 0) / bfResids.length);
 
+            const maxObsBF = Math.max(...nuPairs.map(p => Math.abs(p.bf||0)), 0.1);
+            const maxNuDisp = Math.max(...nuPairs.map(p => Math.max(Math.abs(p.obsNu||0), Math.abs(p.predNu||0))), 1);
+
             function bfRow(p) {
                 let r = '<tr>';
                 r += `<td>${p.pair}</td>`;
                 r += `<td>${p.vol.toFixed(2)}</td>`;
-                r += `<td>${p.bf.toFixed(2)}</td>`;
-                r += `<td>${p.obsNu.toFixed(2)}</td>`;
-                r += `<td>${p.predNu.toFixed(2)}</td>`;
-                r += `<td>${p.predBF.toFixed(2)}</td>`;
+                r += td(p.obsNu.toFixed(2), true, maxNuDisp);
+                r += td(p.predNu.toFixed(2), true, maxNuDisp);
+                r += td(p.bf.toFixed(2), true, maxObsBF);
+                r += td(p.predBF.toFixed(2), true, maxObsBF);
                 r += td(fmtSigned(p.residualBF), true, maxResBF);
                 r += '</tr>';
                 return r;
@@ -1273,7 +1276,7 @@ function computeBasket() {
 
             function bfTableHeader() {
                 let h = '<table class="data-table"><thead><tr>';
-                ['Pair','Vol%','BF%','Obs ν','Pred ν','Pred BF%','Resid BF'].forEach(c => h += `<th>${c}</th>`);
+                ['Pair','Vol%','Obs ν','Pred ν','Obs BF%','Pred BF%','Residual'].forEach(c => h += `<th>${c}</th>`);
                 h += '</tr></thead><tbody>';
                 return h;
             }

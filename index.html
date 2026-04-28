@@ -1105,32 +1105,78 @@ function computeBasket() {
     });
     html += '</tbody></table></div>';
 
-    // Pair results
-    html += '<div class="card"><div class="section-title">Pair Decomposition (' + tenor + ')</div>';
-    html += '<table class="data-table"><thead><tr>';
-    ['Pair','Vol%','w LHS','w RHS','Obs β','Pred β','Obs RR%','Pred RR%','Residual'].forEach(h => html += `<th>${h}</th>`);
-    html += '</tr></thead><tbody>';
-
+    // Pair results — with toggle between residual sort and currency grouping
     const maxResid = Math.max(...pairList.map(p => Math.abs(p.residual||0)), 0.1);
-
-    pairList.forEach(p => {
-        html += '<tr>';
-        html += `<td>${p.pair}</td>`;
-        html += `<td>${p.vol.toFixed(2)}</td>`;
-        html += `<td>${p.wL.toFixed(2)}</td>`;
-        html += `<td>${p.wR.toFixed(2)}</td>`;
-        html += td(fmtSigned(p.obsBeta), true, maxCcyBeta);
-        html += td(fmtSigned(p.predBeta), true, maxCcyBeta);
-        html += td(p.rr != null ? fmtSigned(p.rr) : '—', true, 2);
-        html += td(p.predRR != null ? fmtSigned(p.predRR) : '—', true, 2);
-        html += td(p.residual != null ? fmtSigned(p.residual) : '—', true, maxResid);
-        html += '</tr>';
-    });
-
-    html += '</tbody></table>';
     const residuals = pairList.filter(p => p.residual != null).map(p => p.residual);
     const rmse = Math.sqrt(residuals.reduce((s,r) => s + r*r, 0) / residuals.length);
-    html += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${rmse.toFixed(4)}% · Sorted by |residual|</div>`;
+
+    // Helper: render a pair row
+    function pairRow(p) {
+        let r = '<tr>';
+        r += `<td>${p.pair}</td>`;
+        r += `<td>${p.vol.toFixed(2)}</td>`;
+        r += td(fmtSigned(p.obsBeta), true, maxCcyBeta);
+        r += td(fmtSigned(p.predBeta), true, maxCcyBeta);
+        r += td(p.rr != null ? fmtSigned(p.rr) : '—', true, 2);
+        r += td(p.predRR != null ? fmtSigned(p.predRR) : '—', true, 2);
+        r += td(p.residual != null ? fmtSigned(p.residual) : '—', true, maxResid);
+        r += '</tr>';
+        return r;
+    }
+
+    function pairTableHeader() {
+        let h = '<table class="data-table"><thead><tr>';
+        ['Pair','Vol%','Obs β','Pred β','Obs RR%','Pred RR%','Residual'].forEach(c => h += `<th>${c}</th>`);
+        h += '</tr></thead><tbody>';
+        return h;
+    }
+
+    // View 1: sorted by |residual|
+    let viewResid = '<div id="basket-view-resid">';
+    viewResid += pairTableHeader();
+    pairList.forEach(p => viewResid += pairRow(p));
+    viewResid += '</tbody></table>';
+    viewResid += `<div style="margin-top:8px; font-size:10px; color:var(--text-muted);">RMSE: ${rmse.toFixed(4)}% · Sorted by |residual|</div>`;
+    viewResid += '</div>';
+
+    // View 2: grouped by currency
+    // Build currency → [pairs] map
+    const ccyPairs = {};
+    ccys.forEach(c => ccyPairs[c] = []);
+    pairList.forEach(p => {
+        ccyPairs[p.lhs].push(p);
+        ccyPairs[p.rhs].push(p);
+    });
+
+    let viewCcy = '<div id="basket-view-ccy" style="display:none;">';
+    // Sort currencies by beta (most negative first — risk-on to safe-haven)
+    const ccyOrder = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
+    ccyOrder.forEach(ccy => {
+        const cp = ccyPairs[ccy];
+        if (cp.length === 0) return;
+        // Sort pairs within currency by |residual|
+        cp.sort((a,b) => Math.abs(b.residual||0) - Math.abs(a.residual||0));
+        const b = ccyBetas[ccy];
+        const bv = basketVols[ccy] * 100;
+        viewCcy += `<div style="margin-top:16px; margin-bottom:4px;">`;
+        viewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
+        viewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
+        viewCcy += `Basket Vol: ${bv.toFixed(2)}% · β: ${fmtSigned(b)} · ${b >= 0 ? 'Safe haven' : 'Risk-on'}`;
+        viewCcy += `</span></div>`;
+        viewCcy += pairTableHeader();
+        cp.forEach(p => viewCcy += pairRow(p));
+        viewCcy += '</tbody></table>';
+    });
+    viewCcy += '</div>';
+
+    html += '<div class="card">';
+    html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
+    html += `<div class="section-title" style="margin:0; border:none; padding:0;">Pair Decomposition (${tenor})</div>`;
+    html += '<div class="btn-row" style="margin:0;">';
+    html += '<button class="btn" id="btn-view-resid" onclick="toggleBasketView(\'resid\')" style="font-size:9px; padding:4px 10px; background:var(--cyan); color:#000;">By Residual</button>';
+    html += '<button class="btn" id="btn-view-ccy" onclick="toggleBasketView(\'ccy\')" style="font-size:9px; padding:4px 10px;">By Currency</button>';
+    html += '</div></div>';
+    html += viewResid + viewCcy;
     html += '</div>';
 
     // ═══════════ ν_log BASKET SOLVE ═══════════
@@ -1270,6 +1316,25 @@ function computeBasket() {
     }
 
     document.getElementById('basket-results').innerHTML = html;
+}
+
+function toggleBasketView(view) {
+    const residEl = document.getElementById('basket-view-resid');
+    const ccyEl = document.getElementById('basket-view-ccy');
+    const btnResid = document.getElementById('btn-view-resid');
+    const btnCcy = document.getElementById('btn-view-ccy');
+    if (!residEl || !ccyEl) return;
+    if (view === 'ccy') {
+        residEl.style.display = 'none';
+        ccyEl.style.display = 'block';
+        btnResid.style.background = 'transparent'; btnResid.style.color = 'var(--cyan)';
+        btnCcy.style.background = 'var(--cyan)'; btnCcy.style.color = '#000';
+    } else {
+        residEl.style.display = 'block';
+        ccyEl.style.display = 'none';
+        btnResid.style.background = 'var(--cyan)'; btnResid.style.color = '#000';
+        btnCcy.style.background = 'transparent'; btnCcy.style.color = 'var(--cyan)';
+    }
 }
 
 function copyBasketEmail() {

@@ -969,23 +969,48 @@ function computeBasket() {
     });
     const ccys = [...ccySet].sort();
 
-    // Basket vols: BasketVol(X) = sqrt(mean of σ²(X,j) for all j paired with X)
-    const basketVols = {};
+    // ── Basket vols: full and LOO (Leave-One-Out) ──
+    // Full: BasketVol(X) = sqrt(mean of σ²(X,j) for all j paired with X)
+    // LOO: for pair (X,Y), BasketVol_LOO(X, excl Y) = sqrt(mean of σ²(X,k), k≠Y)
+    const basketVols = {};      // full basket vols for display
+    const looBasketVols = {};   // looBasketVols[ccy][pair] = LOO vol (decimal)
+    const ccyPairVars = {};     // ccyPairVars[ccy] = {pair: var, ...}
+
     ccys.forEach(ccy => {
-        const vol2s = [];
+        const pairVars = {};
+        let sumVar = 0, count = 0;
         Object.entries(pairs).forEach(([pair, d]) => {
             const [lhs, rhs] = [pair.slice(0,3), pair.slice(3,6)];
-            if (lhs === ccy || rhs === ccy) vol2s.push((d.vol/100)**2);
+            if (lhs === ccy || rhs === ccy) {
+                const v2 = (d.vol / 100) ** 2;
+                pairVars[pair] = v2;
+                sumVar += v2;
+                count++;
+            }
         });
-        basketVols[ccy] = vol2s.length > 0 ? Math.sqrt(vol2s.reduce((a,b)=>a+b,0)/vol2s.length) : 0;
+        basketVols[ccy] = count > 0 ? Math.sqrt(sumVar / count) : 0;
+        ccyPairVars[ccy] = { pairVars, sumVar, count };
+
+        // LOO: for each pair involving this ccy, exclude it
+        looBasketVols[ccy] = {};
+        Object.keys(pairVars).forEach(exclPair => {
+            const looSum = sumVar - pairVars[exclPair];
+            const looCount = count - 1;
+            looBasketVols[ccy][exclPair] = looCount > 0
+                ? Math.sqrt(looSum / looCount)
+                : basketVols[ccy];
+        });
     });
 
-    // Pair weights: w_LHS = BasketVar(LHS) / (BasketVar(LHS) + BasketVar(RHS))
+    // Pair weights using LOO basket vols
     function pairWeights(pair) {
         const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
-        const bv1 = basketVols[lhs]**2, bv2 = basketVols[rhs]**2;
-        const total = bv1 + bv2;
-        return total > 0 ? [bv1/total, bv2/total] : [0.5, 0.5];
+        const bv1 = (looBasketVols[lhs] && looBasketVols[lhs][pair] !== undefined)
+            ? looBasketVols[lhs][pair] : basketVols[lhs];
+        const bv2 = (looBasketVols[rhs] && looBasketVols[rhs][pair] !== undefined)
+            ? looBasketVols[rhs][pair] : basketVols[rhs];
+        const total = bv1**2 + bv2**2;
+        return total > 0 ? [bv1**2/total, bv2**2/total] : [0.5, 0.5];
     }
 
     // Build linear system: for each pair with RR,
@@ -1079,7 +1104,7 @@ function computeBasket() {
     // Sort pairs by absolute residual descending
     pairList.sort((a,b) => Math.abs(b.residual||0) - Math.abs(a.residual||0));
 
-    lastBasketResults = { ccys, ccyBetas, basketVols, pairList, tenor };
+    lastBasketResults = { ccys, ccyBetas, basketVols, looBasketVols, corrMatrix, pairList, tenor };
 
     // ── Render results ──
     let html = '';
@@ -1101,6 +1126,100 @@ function computeBasket() {
         html += `<td>${bv.toFixed(2)}%</td>`;
         html += td(fmtSigned(b), true, maxCcyBeta);
         html += `<td style="color:var(--text-secondary); font-size:10px;">${ccy} strengthens 1% → vol ${b >= 0 ? 'rises' : 'falls'} ${Math.abs(b).toFixed(2)}v</td>`;
+        html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // ── Basket Vol Decomposition Table ──
+    html += '<div class="card"><div class="section-title">Pair Variance Attribution (' + tenor + ')</div>';
+    html += '<table class="data-table"><thead><tr>';
+    ['Pair','Pair Vol','Basket LHS','Basket RHS','% LHS','% RHS',''].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    // Sort pairs by pair name for clean display
+    const decompPairs = Object.keys(pairs).sort();
+    decompPairs.forEach(pair => {
+        const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
+        const [wL, wR] = pairWeights(pair);
+        const pctL = (wL * 100).toFixed(0);
+        const pctR = (wR * 100).toFixed(0);
+        const bvL = (looBasketVols[lhs] && looBasketVols[lhs][pair] !== undefined)
+            ? looBasketVols[lhs][pair] * 100 : basketVols[lhs] * 100;
+        const bvR = (looBasketVols[rhs] && looBasketVols[rhs][pair] !== undefined)
+            ? looBasketVols[rhs][pair] * 100 : basketVols[rhs] * 100;
+        html += '<tr>';
+        html += `<td>${pair}</td>`;
+        html += `<td>${pairs[pair].vol.toFixed(2)}</td>`;
+        html += `<td>${bvL.toFixed(2)}%</td>`;
+        html += `<td>${bvR.toFixed(2)}%</td>`;
+        html += `<td>${pctL}%</td>`;
+        html += `<td>${pctR}%</td>`;
+        // Bar
+        html += '<td style="width:160px; padding:2px 4px;">';
+        html += `<div style="display:flex; height:12px; border-radius:2px; overflow:hidden;">`;
+        html += `<div style="width:${pctL}%; background:var(--cyan); opacity:0.7;"></div>`;
+        html += `<div style="width:${pctR}%; background:var(--yellow); opacity:0.7;"></div>`;
+        html += `</div></td>`;
+        html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // ── NxN Basket Correlation Matrix ──
+    const corrMatrix = {};
+    ccys.forEach(c1 => {
+        corrMatrix[c1] = {};
+        ccys.forEach(c2 => corrMatrix[c1][c2] = (c1 === c2) ? 1.0 : null);
+    });
+
+    for (let i = 0; i < ccys.length; i++) {
+        for (let j = i + 1; j < ccys.length; j++) {
+            const c1 = ccys[i], c2 = ccys[j];
+            // Find the pair containing both currencies
+            const matchPair = Object.keys(pairs).find(p => {
+                const [l,r] = [p.slice(0,3), p.slice(3,6)];
+                return (l === c1 && r === c2) || (l === c2 && r === c1);
+            });
+            if (matchPair) {
+                const pairVol = pairs[matchPair].vol / 100;
+                const bv1 = (looBasketVols[c1] && looBasketVols[c1][matchPair] !== undefined)
+                    ? looBasketVols[c1][matchPair] : basketVols[c1];
+                const bv2 = (looBasketVols[c2] && looBasketVols[c2][matchPair] !== undefined)
+                    ? looBasketVols[c2][matchPair] : basketVols[c2];
+                if (bv1 > 0 && bv2 > 0) {
+                    let rho = (bv1*bv1 + bv2*bv2 - pairVol*pairVol) / (2 * bv1 * bv2);
+                    rho = Math.max(-1, Math.min(1, rho));
+                    corrMatrix[c1][c2] = rho;
+                    corrMatrix[c2][c1] = rho;
+                }
+            }
+        }
+    }
+
+    html += '<div class="card"><div class="section-title">Basket Correlation Matrix (' + tenor + ')</div>';
+    html += '<table class="data-table"><thead><tr><th></th>';
+    ccys.forEach(c => html += `<th>${c}</th>`);
+    html += '</tr></thead><tbody>';
+
+    ccys.forEach(c1 => {
+        html += '<tr>';
+        html += `<td>${c1}</td>`;
+        ccys.forEach(c2 => {
+            const rho = corrMatrix[c1][c2];
+            if (rho === null) {
+                html += '<td style="color:var(--muted);">—</td>';
+            } else if (c1 === c2) {
+                html += '<td style="color:var(--text-secondary);">1.00</td>';
+            } else {
+                const intensity = Math.min(Math.abs(rho), 1.0);
+                const bgColor = rho >= 0
+                    ? `rgba(74, 222, 128, ${0.05 + intensity * 0.25})`
+                    : `rgba(248, 113, 113, ${0.05 + intensity * 0.25})`;
+                const textColor = rho >= 0
+                    ? `rgb(${Math.round(74-intensity*10)},${Math.round(154+intensity*68)},${Math.round(107-intensity*20)})`
+                    : `rgb(${Math.round(184+intensity*64)},${Math.round(112-intensity*50)},${Math.round(112-intensity*40)})`;
+                html += `<td style="background:${bgColor}; color:${textColor}; font-weight:${intensity > 0.5 ? 600 : 400};">${rho.toFixed(2)}</td>`;
+            }
+        });
         html += '</tr>';
     });
     html += '</tbody></table></div>';
@@ -1406,7 +1525,7 @@ function toggleBasketView(view) {
 
 function copyBasketEmail() {
     if (!lastBasketResults) computeBasket();
-    const { ccys, ccyBetas, basketVols, pairList, tenor } = lastBasketResults;
+    const { ccys, ccyBetas, basketVols, corrMatrix, pairList, tenor } = lastBasketResults;
     const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
 
     function emailColor(v, maxAbs=2) {
@@ -1455,7 +1574,34 @@ function copyBasketEmail() {
         h += `</tr>`;
     });
     h += `</table>`;
-    h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">β = vol pts per 1% spot · Basket vol weighted least squares</p></div>`;
+    // Correlation matrix in email
+    if (corrMatrix) {
+        h += `<h3 style="font-size: 12px; margin-top: 16px;">BASKET CORRELATION MATRIX</h3>`;
+        h += `<table style="border-collapse: collapse; font-family: Consolas, monospace; font-size: 11px;">`;
+        h += `<tr style="background: #0d1117; color: #e5e5e5;"><th style="padding: 4px 6px; border: 1px solid #d1d5db;"></th>`;
+        ccys.forEach(c => h += `<th style="padding: 4px 6px; border: 1px solid #d1d5db;">${c}</th>`);
+        h += `</tr>`;
+        ccys.forEach(c1 => {
+            h += `<tr><td style="padding: 4px 6px; border: 1px solid #e5e7eb; font-weight: 600; background: #0d1117; color: #e5e5e5;">${c1}</td>`;
+            ccys.forEach(c2 => {
+                const rho = corrMatrix[c1] && corrMatrix[c1][c2];
+                if (rho === null || rho === undefined) {
+                    h += `<td style="padding: 4px 6px; border: 1px solid #e5e7eb; color: #9ca3af;">—</td>`;
+                } else {
+                    const intensity = Math.min(Math.abs(rho), 1.0);
+                    const bg = rho >= 0
+                        ? `rgb(${Math.round(240-intensity*60)},${Math.round(255-intensity*15)},${Math.round(240-intensity*60)})`
+                        : `rgb(${Math.round(255-intensity*10)},${Math.round(235-intensity*60)},${Math.round(235-intensity*60)})`;
+                    const col = c1 === c2 ? '#6b7280' : (rho >= 0 ? '#166534' : '#991b1b');
+                    h += `<td style="padding: 4px 6px; border: 1px solid #e5e7eb; background: ${bg}; color: ${col}; text-align: center;">${rho.toFixed(2)}</td>`;
+                }
+            });
+            h += `</tr>`;
+        });
+        h += `</table>`;
+    }
+
+    h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">β = vol pts per 1% spot · LOO basket vol weighted · Calendar days</p></div>`;
 
     try {
         const blob = new Blob([h], { type: 'text/html' });

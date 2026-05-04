@@ -969,48 +969,25 @@ function computeBasket() {
     });
     const ccys = [...ccySet].sort();
 
-    // ── Basket vols: full and LOO (Leave-One-Out) ──
-    // Full: BasketVol(X) = sqrt(mean of σ²(X,j) for all j paired with X)
-    // LOO: for pair (X,Y), BasketVol_LOO(X, excl Y) = sqrt(mean of σ²(X,k), k≠Y)
-    const basketVols = {};      // full basket vols for display
-    const looBasketVols = {};   // looBasketVols[ccy][pair] = LOO vol (decimal)
-    const ccyPairVars = {};     // ccyPairVars[ccy] = {pair: var, ...}
+    // ── Basket vols: one fixed vol per currency ──
+    // BasketVol(X) = sqrt(mean of σ²(X,j) for all j paired with X)
+    const basketVols = {};
 
     ccys.forEach(ccy => {
-        const pairVars = {};
-        let sumVar = 0, count = 0;
+        const vol2s = [];
         Object.entries(pairs).forEach(([pair, d]) => {
             const [lhs, rhs] = [pair.slice(0,3), pair.slice(3,6)];
-            if (lhs === ccy || rhs === ccy) {
-                const v2 = (d.vol / 100) ** 2;
-                pairVars[pair] = v2;
-                sumVar += v2;
-                count++;
-            }
+            if (lhs === ccy || rhs === ccy) vol2s.push((d.vol / 100) ** 2);
         });
-        basketVols[ccy] = count > 0 ? Math.sqrt(sumVar / count) : 0;
-        ccyPairVars[ccy] = { pairVars, sumVar, count };
-
-        // LOO: for each pair involving this ccy, exclude it
-        looBasketVols[ccy] = {};
-        Object.keys(pairVars).forEach(exclPair => {
-            const looSum = sumVar - pairVars[exclPair];
-            const looCount = count - 1;
-            looBasketVols[ccy][exclPair] = looCount > 0
-                ? Math.sqrt(looSum / looCount)
-                : basketVols[ccy];
-        });
+        basketVols[ccy] = vol2s.length > 0 ? Math.sqrt(vol2s.reduce((a,b) => a+b, 0) / vol2s.length) : 0;
     });
 
-    // Pair weights using LOO basket vols
+    // Pair weights using full basket vols
     function pairWeights(pair) {
         const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
-        const bv1 = (looBasketVols[lhs] && looBasketVols[lhs][pair] !== undefined)
-            ? looBasketVols[lhs][pair] : basketVols[lhs];
-        const bv2 = (looBasketVols[rhs] && looBasketVols[rhs][pair] !== undefined)
-            ? looBasketVols[rhs][pair] : basketVols[rhs];
-        const total = bv1**2 + bv2**2;
-        return total > 0 ? [bv1**2/total, bv2**2/total] : [0.5, 0.5];
+        const bv1 = basketVols[lhs] ** 2, bv2 = basketVols[rhs] ** 2;
+        const total = bv1 + bv2;
+        return total > 0 ? [bv1 / total, bv2 / total] : [0.5, 0.5];
     }
 
     // Build linear system: for each pair with RR,
@@ -1104,7 +1081,7 @@ function computeBasket() {
     // Sort pairs by absolute residual descending
     pairList.sort((a,b) => Math.abs(b.residual||0) - Math.abs(a.residual||0));
 
-    lastBasketResults = { ccys, ccyBetas, basketVols, looBasketVols, corrMatrix, pairList, tenor };
+    lastBasketResults = { ccys, ccyBetas, basketVols, corrMatrix, pairList, tenor };
 
     // ── Render results ──
     let html = '';
@@ -1143,10 +1120,8 @@ function computeBasket() {
         const [wL, wR] = pairWeights(pair);
         const pctL = (wL * 100).toFixed(0);
         const pctR = (wR * 100).toFixed(0);
-        const bvL = (looBasketVols[lhs] && looBasketVols[lhs][pair] !== undefined)
-            ? looBasketVols[lhs][pair] * 100 : basketVols[lhs] * 100;
-        const bvR = (looBasketVols[rhs] && looBasketVols[rhs][pair] !== undefined)
-            ? looBasketVols[rhs][pair] * 100 : basketVols[rhs] * 100;
+        const bvL = basketVols[lhs] * 100;
+        const bvR = basketVols[rhs] * 100;
         html += '<tr>';
         html += `<td>${pair}</td>`;
         html += `<td>${pairs[pair].vol.toFixed(2)}</td>`;
@@ -1164,7 +1139,13 @@ function computeBasket() {
     });
     html += '</tbody></table></div>';
 
-    // ── NxN Basket Correlation Matrix ──
+    // ── NxN Basket Correlation Matrix (scaling method) ──
+    // Long basket_A - Short basket_B = (N/(N-1)) × pair_AB
+    // So: σ²(pair) = ((N-1)/N)² × [σ²_A + σ²_B - 2ρσ_Aσ_B]
+    // Rearranging: ρ = [σ²_A + σ²_B - (N/(N-1))² × σ²_pair] / (2σ_Aσ_B)
+    const Nccy = ccys.length;
+    const scaleFactor = (Nccy / (Nccy - 1)) * (Nccy / (Nccy - 1));
+
     const corrMatrix = {};
     ccys.forEach(c1 => {
         corrMatrix[c1] = {};
@@ -1174,19 +1155,15 @@ function computeBasket() {
     for (let i = 0; i < ccys.length; i++) {
         for (let j = i + 1; j < ccys.length; j++) {
             const c1 = ccys[i], c2 = ccys[j];
-            // Find the pair containing both currencies
             const matchPair = Object.keys(pairs).find(p => {
                 const [l,r] = [p.slice(0,3), p.slice(3,6)];
                 return (l === c1 && r === c2) || (l === c2 && r === c1);
             });
             if (matchPair) {
                 const pairVol = pairs[matchPair].vol / 100;
-                const bv1 = (looBasketVols[c1] && looBasketVols[c1][matchPair] !== undefined)
-                    ? looBasketVols[c1][matchPair] : basketVols[c1];
-                const bv2 = (looBasketVols[c2] && looBasketVols[c2][matchPair] !== undefined)
-                    ? looBasketVols[c2][matchPair] : basketVols[c2];
+                const bv1 = basketVols[c1], bv2 = basketVols[c2];
                 if (bv1 > 0 && bv2 > 0) {
-                    let rho = (bv1*bv1 + bv2*bv2 - pairVol*pairVol) / (2 * bv1 * bv2);
+                    let rho = (bv1*bv1 + bv2*bv2 - scaleFactor * pairVol*pairVol) / (2 * bv1 * bv2);
                     rho = Math.max(-1, Math.min(1, rho));
                     corrMatrix[c1][c2] = rho;
                     corrMatrix[c2][c1] = rho;
@@ -1196,6 +1173,7 @@ function computeBasket() {
     }
 
     html += '<div class="card"><div class="section-title">Basket Correlation Matrix (' + tenor + ')</div>';
+    html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">N=${Nccy} currencies · Scale factor (N/(N-1))² = ${scaleFactor.toFixed(3)} · ρ = (σ²_A + σ²_B - ${scaleFactor.toFixed(3)}×σ²_pair) / (2σ_Aσ_B)</div>`;
     html += '<table class="data-table"><thead><tr><th></th>';
     ccys.forEach(c => html += `<th>${c}</th>`);
     html += '</tr></thead><tbody>';
@@ -1525,7 +1503,7 @@ function toggleBasketView(view) {
 
 function copyBasketEmail() {
     if (!lastBasketResults) computeBasket();
-    const { ccys, ccyBetas, basketVols, corrMatrix, pairList, tenor } = lastBasketResults;
+    const { ccys, ccyBetas, basketVols, corrMatrix, pairList, tenor } = lastBasketResults || {};
     const now = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
 
     function emailColor(v, maxAbs=2) {

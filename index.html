@@ -1356,31 +1356,79 @@ function computeBasket() {
         if (fairResults.length > 0) {
             const maxSig = Math.max(...fairResults.map(r => Math.abs(r.signal)), 0.3);
 
-            html += '<div class="card"><div class="section-title">Cross-Sectional Fair Values (' + tenor + ')</div>';
-            html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Fair vol computed out-of-sample (excl own pair). Positive signal = CHEAP, Negative = RICH.</div>';
-            html += '<table class="data-table"><thead><tr>';
-            ['Pair','Implied Vol','Fair Vol','Signal','ρ Pred','Direction'].forEach(h => html += `<th>${h}</th>`);
-            html += '</tr></thead><tbody>';
-
-            fairResults.forEach(r => {
-                const dir = r.signal > 0.05 ? 'CHEAP' : r.signal < -0.05 ? 'RICH' : 'FLAT';
-                const dirStyle = dir === 'CHEAP'
+            function fvDirStyle(sig) {
+                const dir = sig > 0.05 ? 'CHEAP' : sig < -0.05 ? 'RICH' : 'FLAT';
+                const s = dir === 'CHEAP'
                     ? 'background:rgba(74,222,128,0.15); color:#4ade80; padding:2px 6px; border-radius:2px; font-size:9px;'
                     : dir === 'RICH'
                     ? 'background:rgba(248,113,113,0.15); color:#f87171; padding:2px 6px; border-radius:2px; font-size:9px;'
                     : 'background:rgba(107,114,128,0.15); color:#6b7280; padding:2px 6px; border-radius:2px; font-size:9px;';
+                return { dir, style: s };
+            }
 
-                html += '<tr>';
-                html += `<td>${r.pair}</td>`;
-                html += `<td>${r.impliedVol.toFixed(2)}</td>`;
-                html += `<td>${r.fairVol.toFixed(2)}</td>`;
-                html += td(fmtSigned(r.signal), true, maxSig);
-                html += `<td>${r.rhoPred.toFixed(2)}</td>`;
-                html += `<td><span style="${dirStyle}">${dir}</span></td>`;
-                html += '</tr>';
+            function fvRow(r) {
+                const { dir, style: ds } = fvDirStyle(r.signal);
+                let row = '<tr>';
+                row += `<td>${r.pair}</td>`;
+                row += `<td>${r.impliedVol.toFixed(2)}</td>`;
+                row += `<td>${r.fairVol.toFixed(2)}</td>`;
+                row += td(fmtSigned(r.signal), true, maxSig);
+                row += `<td>${r.rhoPred.toFixed(2)}</td>`;
+                row += `<td><span style="${ds}">${dir}</span></td>`;
+                row += '</tr>';
+                return row;
+            }
+
+            function fvTableHeader() {
+                let h = '<table class="data-table"><thead><tr>';
+                ['Pair','Implied Vol','Fair Vol','Signal','ρ Pred','Direction'].forEach(c => h += `<th>${c}</th>`);
+                h += '</tr></thead><tbody>';
+                return h;
+            }
+
+            // View 1: sorted by |signal|
+            let fvViewResid = '<div id="fv-view-resid">';
+            fvViewResid += fvTableHeader();
+            fairResults.forEach(r => fvViewResid += fvRow(r));
+            fvViewResid += '</tbody></table></div>';
+
+            // View 2: grouped by currency
+            const fvCcyPairs = {};
+            ccys.forEach(c => fvCcyPairs[c] = []);
+            fairResults.forEach(r => {
+                fvCcyPairs[r.c1].push(r);
+                fvCcyPairs[r.c2].push(r);
             });
 
-            html += '</tbody></table></div>';
+            let fvViewCcy = '<div id="fv-view-ccy" style="display:none;">';
+            const fvCcyOrder = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
+            fvCcyOrder.forEach(ccy => {
+                const cp = fvCcyPairs[ccy];
+                if (!cp || cp.length === 0) return;
+                cp.sort((a,b) => Math.abs(b.signal) - Math.abs(a.signal));
+                const b = ccyBetas[ccy];
+                const bv = basketVols[ccy] * 100;
+                fvViewCcy += `<div style="margin-top:16px; margin-bottom:4px;">`;
+                fvViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
+                fvViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
+                fvViewCcy += `Basket Vol: ${bv.toFixed(2)}% · β: ${fmtSigned(b)}`;
+                fvViewCcy += `</span></div>`;
+                fvViewCcy += fvTableHeader();
+                cp.forEach(r => fvViewCcy += fvRow(r));
+                fvViewCcy += '</tbody></table>';
+            });
+            fvViewCcy += '</div>';
+
+            html += '<div class="card">';
+            html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
+            html += `<div class="section-title" style="margin:0; border:none; padding:0;">Cross-Sectional Fair Values (${tenor})</div>`;
+            html += '<div class="btn-row" style="margin:0;">';
+            html += '<button class="btn" id="btn-fv-resid" onclick="toggleFVView(\'resid\')" style="font-size:9px; padding:4px 10px; background:var(--cyan); color:#000;">By Signal</button>';
+            html += '<button class="btn" id="btn-fv-ccy" onclick="toggleFVView(\'ccy\')" style="font-size:9px; padding:4px 10px;">By Currency</button>';
+            html += '</div></div>';
+            html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Fair vol out-of-sample (excl own pair). Positive signal = CHEAP, Negative = RICH.</div>';
+            html += fvViewResid + fvViewCcy;
+            html += '</div>';
 
             lastBasketResults.fairResults = fairResults;
         }
@@ -1571,6 +1619,25 @@ function computeBasket() {
     }
 
     document.getElementById('basket-results').innerHTML = html;
+}
+
+function toggleFVView(view) {
+    const residEl = document.getElementById('fv-view-resid');
+    const ccyEl = document.getElementById('fv-view-ccy');
+    const btnResid = document.getElementById('btn-fv-resid');
+    const btnCcy = document.getElementById('btn-fv-ccy');
+    if (!residEl || !ccyEl) return;
+    if (view === 'ccy') {
+        residEl.style.display = 'none';
+        ccyEl.style.display = 'block';
+        btnResid.style.background = 'transparent'; btnResid.style.color = 'var(--cyan)';
+        btnCcy.style.background = 'var(--cyan)'; btnCcy.style.color = '#000';
+    } else {
+        residEl.style.display = 'block';
+        ccyEl.style.display = 'none';
+        btnResid.style.background = 'var(--cyan)'; btnResid.style.color = '#000';
+        btnCcy.style.background = 'transparent'; btnCcy.style.color = 'var(--cyan)';
+    }
 }
 
 function toggleBFView(view) {

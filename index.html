@@ -1276,6 +1276,116 @@ function computeBasket() {
     html += viewResid + viewCcy;
     html += '</div>';
 
+    // ═══════════ CROSS-SECTIONAL FAIR VALUES ═══════════
+    // For each pair (A,B), compute a fair vol that is OUT-OF-SAMPLE
+    // (does not use pair AB's own vol). Signal = Fair - Implied.
+    {
+        const Nfv = ccys.length;
+        const fvScale = (Nfv - 1) / Nfv;
+        const fairResults = [];
+
+        for (let i = 0; i < ccys.length; i++) {
+            for (let j = i + 1; j < ccys.length; j++) {
+                const c1 = ccys[i], c2 = ccys[j];
+                // Find pair in data
+                const matchPair = Object.keys(pairs).find(p => {
+                    const [l,r] = [p.slice(0,3), p.slice(3,6)];
+                    return (l === c1 && r === c2) || (l === c2 && r === c1);
+                });
+                if (!matchPair) continue;
+                const impliedVol = pairs[matchPair].vol / 100; // decimal
+
+                // Step 1: LOO basket vols — exclude pair AB
+                let sum1 = 0, cnt1 = 0, sum2 = 0, cnt2 = 0;
+                for (let k = 0; k < ccys.length; k++) {
+                    if (k === i || k === j) continue;
+                    const ck = ccys[k];
+                    // Find pair c1-ck
+                    const p1 = Object.keys(pairs).find(p => {
+                        const [l,r] = [p.slice(0,3), p.slice(3,6)];
+                        return (l === c1 && r === ck) || (l === ck && r === c1);
+                    });
+                    if (p1) { const v = pairs[p1].vol/100; sum1 += v*v; cnt1++; }
+                    // Find pair c2-ck
+                    const p2 = Object.keys(pairs).find(p => {
+                        const [l,r] = [p.slice(0,3), p.slice(3,6)];
+                        return (l === c2 && r === ck) || (l === ck && r === c2);
+                    });
+                    if (p2) { const v = pairs[p2].vol/100; sum2 += v*v; cnt2++; }
+                }
+                if (cnt1 === 0 || cnt2 === 0) continue;
+                const looBV1 = Math.sqrt(sum1 / cnt1);
+                const looBV2 = Math.sqrt(sum2 / cnt2);
+
+                // Step 2: Predicted correlation via rank-1 factor model
+                // ρ_pred(A,B) = mean over C≠A,B of ρ(A,C) × ρ(B,C)
+                let rhoSum = 0, rhoCnt = 0;
+                for (let k = 0; k < ccys.length; k++) {
+                    if (k === i || k === j) continue;
+                    const ck = ccys[k];
+                    const rAC = corrMatrix[c1] && corrMatrix[c1][ck];
+                    const rBC = corrMatrix[c2] && corrMatrix[c2][ck];
+                    if (rAC != null && rBC != null) {
+                        rhoSum += rAC * rBC;
+                        rhoCnt++;
+                    }
+                }
+                if (rhoCnt === 0) continue;
+                const rhoPred = Math.max(-1, Math.min(1, rhoSum / rhoCnt));
+
+                // Step 3: Fair vol = sqrt(σ²_A + σ²_B - 2ρσ_Aσ_B) × (N-1)/N
+                const fairVar = looBV1*looBV1 + looBV2*looBV2 - 2*rhoPred*looBV1*looBV2;
+                if (fairVar < 0) continue;
+                const fairVol = Math.sqrt(fairVar) * fvScale;
+
+                // Step 4: Signal
+                const signal = (fairVol - impliedVol) * 100; // in vol %
+
+                fairResults.push({
+                    pair: matchPair, c1, c2,
+                    impliedVol: impliedVol * 100,
+                    fairVol: fairVol * 100,
+                    signal,
+                    rhoPred,
+                });
+            }
+        }
+
+        fairResults.sort((a,b) => Math.abs(b.signal) - Math.abs(a.signal));
+
+        if (fairResults.length > 0) {
+            const maxSig = Math.max(...fairResults.map(r => Math.abs(r.signal)), 0.3);
+
+            html += '<div class="card"><div class="section-title">Cross-Sectional Fair Values (' + tenor + ')</div>';
+            html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Fair vol computed out-of-sample (excl own pair). Positive signal = CHEAP, Negative = RICH.</div>';
+            html += '<table class="data-table"><thead><tr>';
+            ['Pair','Implied Vol','Fair Vol','Signal','ρ Pred','Direction'].forEach(h => html += `<th>${h}</th>`);
+            html += '</tr></thead><tbody>';
+
+            fairResults.forEach(r => {
+                const dir = r.signal > 0.05 ? 'CHEAP' : r.signal < -0.05 ? 'RICH' : 'FLAT';
+                const dirStyle = dir === 'CHEAP'
+                    ? 'background:rgba(74,222,128,0.15); color:#4ade80; padding:2px 6px; border-radius:2px; font-size:9px;'
+                    : dir === 'RICH'
+                    ? 'background:rgba(248,113,113,0.15); color:#f87171; padding:2px 6px; border-radius:2px; font-size:9px;'
+                    : 'background:rgba(107,114,128,0.15); color:#6b7280; padding:2px 6px; border-radius:2px; font-size:9px;';
+
+                html += '<tr>';
+                html += `<td>${r.pair}</td>`;
+                html += `<td>${r.impliedVol.toFixed(2)}</td>`;
+                html += `<td>${r.fairVol.toFixed(2)}</td>`;
+                html += td(fmtSigned(r.signal), true, maxSig);
+                html += `<td>${r.rhoPred.toFixed(2)}</td>`;
+                html += `<td><span style="${dirStyle}">${dir}</span></td>`;
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+
+            lastBasketResults.fairResults = fairResults;
+        }
+    }
+
     // ═══════════ ν_log BASKET SOLVE ═══════════
     // For each pair: ν²_obs = w_L × ν_L² + w_R × ν_R²  (weighted average, ρ_vol=0)
     const hasBF = pairList.some(p => p.obsNu != null);
@@ -1579,7 +1689,29 @@ function copyBasketEmail() {
         h += `</table>`;
     }
 
-    h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">β = vol pts per 1% spot · LOO basket vol weighted · Calendar days</p></div>`;
+    // Fair values in email
+    if (lastBasketResults.fairResults && lastBasketResults.fairResults.length > 0) {
+        h += `<h3 style="font-size: 12px; margin-top: 16px;">CROSS-SECTIONAL FAIR VALUES</h3>`;
+        h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
+        h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
+        ['Pair','Implied','Fair','Signal','Direction'].forEach(hd => h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`);
+        h += `</tr>`;
+        lastBasketResults.fairResults.forEach(r => {
+            const dir = r.signal > 0.05 ? 'CHEAP' : r.signal < -0.05 ? 'RICH' : 'FLAT';
+            const sc = emailColor(r.signal, 0.5);
+            const dc = dir === 'CHEAP' ? '#166534' : dir === 'RICH' ? '#991b1b' : '#6b7280';
+            h += `<tr>`;
+            h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.pair}</td>`;
+            h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.impliedVol.toFixed(2)}</td>`;
+            h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.fairVol.toFixed(2)}</td>`;
+            h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color:${sc.color}; background:${sc.bg};">${fmtSigned(r.signal)}</td>`;
+            h += `<td style="padding: 4px 8px; text-align: center; border: 1px solid #e5e7eb; color:${dc}; font-weight:600;">${dir}</td>`;
+            h += `</tr>`;
+        });
+        h += `</table>`;
+    }
+
+    h += `<p style="color: #9ca3af; font-size: 10px; margin-top: 12px;">β = vol pts per 1% spot · Basket vol weighted · Calendar days</p></div>`;
 
     try {
         const blob = new Blob([h], { type: 'text/html' });

@@ -1108,36 +1108,78 @@ function computeBasket() {
     html += '</tbody></table></div>';
 
     // ── Basket Vol Decomposition Table ──
-    html += '<div class="card"><div class="section-title">Pair Variance Attribution (' + tenor + ')</div>';
-    html += '<table class="data-table"><thead><tr>';
-    ['Pair','Pair Vol','Basket LHS','Basket RHS','% LHS','% RHS',''].forEach(h => html += `<th>${h}</th>`);
-    html += '</tr></thead><tbody>';
-
-    // Sort pairs by pair name for clean display
+    // ── Pair Variance Attribution with toggle ──
     const decompPairs = Object.keys(pairs).sort();
-    decompPairs.forEach(pair => {
+    const decompData = decompPairs.map(pair => {
         const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
         const [wL, wR] = pairWeights(pair);
-        const pctL = (wL * 100).toFixed(0);
-        const pctR = (wR * 100).toFixed(0);
-        const bvL = basketVols[lhs] * 100;
-        const bvR = basketVols[rhs] * 100;
-        html += '<tr>';
-        html += `<td>${pair}</td>`;
-        html += `<td>${pairs[pair].vol.toFixed(2)}</td>`;
-        html += `<td>${bvL.toFixed(2)}%</td>`;
-        html += `<td>${bvR.toFixed(2)}%</td>`;
-        html += `<td>${pctL}%</td>`;
-        html += `<td>${pctR}%</td>`;
-        // Bar
-        html += '<td style="width:160px; padding:2px 4px;">';
-        html += `<div style="display:flex; height:12px; border-radius:2px; overflow:hidden;">`;
-        html += `<div style="width:${pctL}%; background:var(--cyan); opacity:0.7;"></div>`;
-        html += `<div style="width:${pctR}%; background:var(--yellow); opacity:0.7;"></div>`;
-        html += `</div></td>`;
-        html += '</tr>';
+        return { pair, lhs, rhs, vol: pairs[pair].vol, bvL: basketVols[lhs]*100, bvR: basketVols[rhs]*100, pctL: wL*100, pctR: wR*100 };
     });
-    html += '</tbody></table></div>';
+
+    function vaRow(d) {
+        let r = '<tr>';
+        r += `<td>${d.pair}</td>`;
+        r += `<td>${d.vol.toFixed(2)}</td>`;
+        r += `<td>${d.bvL.toFixed(2)}%</td>`;
+        r += `<td>${d.bvR.toFixed(2)}%</td>`;
+        r += `<td>${d.pctL.toFixed(0)}%</td>`;
+        r += `<td>${d.pctR.toFixed(0)}%</td>`;
+        r += '<td style="width:160px; padding:2px 4px;">';
+        r += `<div style="display:flex; height:12px; border-radius:2px; overflow:hidden;">`;
+        r += `<div style="width:${d.pctL.toFixed(0)}%; background:var(--cyan); opacity:0.7;"></div>`;
+        r += `<div style="width:${d.pctR.toFixed(0)}%; background:var(--yellow); opacity:0.7;"></div>`;
+        r += `</div></td></tr>`;
+        return r;
+    }
+
+    function vaTableHeader() {
+        let h = '<table class="data-table"><thead><tr>';
+        ['Pair','Pair Vol','Basket LHS','Basket RHS','% LHS','% RHS',''].forEach(c => h += `<th>${c}</th>`);
+        h += '</tr></thead><tbody>';
+        return h;
+    }
+
+    // View 1: all pairs alphabetically
+    let vaViewAll = '<div id="va-view-all">';
+    vaViewAll += vaTableHeader();
+    decompData.forEach(d => vaViewAll += vaRow(d));
+    vaViewAll += '</tbody></table></div>';
+
+    // View 2: grouped by currency
+    const vaCcyPairs = {};
+    ccys.forEach(c => vaCcyPairs[c] = []);
+    decompData.forEach(d => {
+        vaCcyPairs[d.lhs].push(d);
+        vaCcyPairs[d.rhs].push(d);
+    });
+
+    let vaViewCcy = '<div id="va-view-ccy" style="display:none;">';
+    const vaCcyOrder = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
+    vaCcyOrder.forEach(ccy => {
+        const cp = vaCcyPairs[ccy];
+        if (!cp || cp.length === 0) return;
+        const b = ccyBetas[ccy];
+        const bv = basketVols[ccy] * 100;
+        vaViewCcy += `<div style="margin-top:16px; margin-bottom:4px;">`;
+        vaViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
+        vaViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
+        vaViewCcy += `Basket Vol: ${bv.toFixed(2)}% · β: ${fmtSigned(b)}`;
+        vaViewCcy += `</span></div>`;
+        vaViewCcy += vaTableHeader();
+        cp.forEach(d => vaViewCcy += vaRow(d));
+        vaViewCcy += '</tbody></table>';
+    });
+    vaViewCcy += '</div>';
+
+    html += '<div class="card">';
+    html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
+    html += `<div class="section-title" style="margin:0; border:none; padding:0;">Pair Variance Attribution (${tenor})</div>`;
+    html += '<div class="btn-row" style="margin:0;">';
+    html += '<button class="btn" id="btn-va-all" onclick="toggleVAView(\'all\')" style="font-size:9px; padding:4px 10px; background:var(--cyan); color:#000;">All Pairs</button>';
+    html += '<button class="btn" id="btn-va-ccy" onclick="toggleVAView(\'ccy\')" style="font-size:9px; padding:4px 10px;">By Currency</button>';
+    html += '</div></div>';
+    html += vaViewAll + vaViewCcy;
+    html += '</div>';
 
     // ── NxN Basket Correlation Matrix (scaling method) ──
     // Long basket_A - Short basket_B = (N/(N-1)) × pair_AB
@@ -1621,6 +1663,25 @@ function computeBasket() {
     }
 
     document.getElementById('basket-results').innerHTML = html;
+}
+
+function toggleVAView(view) {
+    const allEl = document.getElementById('va-view-all');
+    const ccyEl = document.getElementById('va-view-ccy');
+    const btnAll = document.getElementById('btn-va-all');
+    const btnCcy = document.getElementById('btn-va-ccy');
+    if (!allEl || !ccyEl) return;
+    if (view === 'ccy') {
+        allEl.style.display = 'none';
+        ccyEl.style.display = 'block';
+        btnAll.style.background = 'transparent'; btnAll.style.color = 'var(--cyan)';
+        btnCcy.style.background = 'var(--cyan)'; btnCcy.style.color = '#000';
+    } else {
+        allEl.style.display = 'block';
+        ccyEl.style.display = 'none';
+        btnAll.style.background = 'var(--cyan)'; btnAll.style.color = '#000';
+        btnCcy.style.background = 'transparent'; btnCcy.style.color = 'var(--cyan)';
+    }
 }
 
 function toggleFVView(view) {

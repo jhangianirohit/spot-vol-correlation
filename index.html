@@ -1081,7 +1081,7 @@ function computeBasket() {
     // Sort pairs by absolute residual descending
     pairList.sort((a,b) => Math.abs(b.residual||0) - Math.abs(a.residual||0));
 
-    lastBasketResults = { ccys, ccyBetas, basketVols, corrMatrix, pairList, tenor };
+    // lastBasketResults set after corrMatrix is computed (below)
 
     // ── Render results ──
     let html = '';
@@ -1201,6 +1201,8 @@ function computeBasket() {
         html += '</tr>';
     });
     html += '</tbody></table></div>';
+
+    lastBasketResults = { ccys, ccyBetas, basketVols, corrMatrix, pairList, tenor };
 
     // Pair results — with toggle between residual sort and currency grouping
     const maxResid = Math.max(...pairList.map(p => Math.abs(p.residual||0)), 0.1);

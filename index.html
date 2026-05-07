@@ -302,6 +302,7 @@ textarea.data-input:focus {
     <button class="tab-btn active" onclick="switchTab('single')">Single Pair</button>
     <button class="tab-btn" onclick="switchTab('cross')">Cross Decomposition</button>
     <button class="tab-btn" onclick="switchTab('basket')">Basket Decomposition</button>
+    <button class="tab-btn" onclick="switchTab('whatif')">What If</button>
 </div>
 
 <!-- ═══════════ TAB 1: SINGLE PAIR ═══════════ -->
@@ -422,6 +423,65 @@ NZDJPY	12.80	-0.95	0.40</textarea>
         </div>
         <div>
             <div id="basket-results"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════ TAB 4: WHAT IF ═══════════ -->
+<div id="tab-whatif" class="tab-panel">
+    <div class="two-col">
+        <div>
+            <div class="card">
+                <div class="section-title">Vol Surface (same as Basket tab)</div>
+                <div style="margin-bottom:6px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.04em;">
+                    Pair Vol(%) · One tenor · Need enough pairs to build basket
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Tenor</label>
+                        <input id="whatif-tenor" value="1M" style="width:80px;">
+                    </div>
+                </div>
+                <textarea id="whatif-vols" class="data-input" rows="18">EURUSD	7.53
+USDJPY	8.81
+GBPUSD	6.92
+AUDUSD	10.07
+USDCHF	8.12
+USDCNH	3.55
+NZDUSD	10.20
+EURJPY	10.80
+EURGBP	5.20
+EURCNH	6.38
+GBPJPY	11.50
+GBPAUD	7.54
+AUDJPY	12.20
+AUDNZD	6.80
+CHFJPY	8.43
+NZDJPY	12.80
+AUDCAD	8.40
+NZDCAD	9.10
+USDCAD	7.80
+EURCAD	7.20</textarea>
+            </div>
+            <div class="card">
+                <div class="section-title">Shock</div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Pair to shock</label>
+                        <input id="whatif-pair" value="AUDCAD" style="width:120px;">
+                    </div>
+                    <div class="input-group">
+                        <label>Vol change (%)</label>
+                        <input id="whatif-delta" value="+0.30" style="width:80px;">
+                    </div>
+                </div>
+                <div class="btn-row">
+                    <button class="btn" onclick="computeWhatIf()">Propagate</button>
+                </div>
+            </div>
+        </div>
+        <div>
+            <div id="whatif-results"></div>
         </div>
     </div>
 </div>
@@ -1856,6 +1916,186 @@ function copyBasketEmail() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// Tab 4: What If — correlation shift propagation
+// ─────────────────────────────────────────────────────────────────
+
+function computeWhatIf() {
+    const tenor = document.getElementById('whatif-tenor').value.trim().toUpperCase();
+    const shockPair = document.getElementById('whatif-pair').value.trim().toUpperCase();
+    const shockDelta = parseFloat(document.getElementById('whatif-delta').value);
+    const text = document.getElementById('whatif-vols').value;
+
+    if (isNaN(shockDelta)) return;
+
+    // Parse vols
+    const pairVols = {}; // pair → vol in decimal
+    text.split('\n').forEach(line => {
+        line = line.trim();
+        if (!line || line.startsWith('#')) return;
+        const parts = line.replace(/,/g,' ').replace(/\t/g,' ').split(/\s+/);
+        if (parts.length < 2) return;
+        const pair = parts[0].toUpperCase();
+        const vol = parseFloat(parts[1]);
+        if (!isNaN(vol)) pairVols[pair] = vol / 100;
+    });
+
+    if (!pairVols[shockPair]) {
+        document.getElementById('whatif-results').innerHTML =
+            `<div class="card" style="color:var(--red);">Pair ${shockPair} not found in vol data.</div>`;
+        return;
+    }
+
+    // Extract currencies
+    const ccySet = new Set();
+    Object.keys(pairVols).forEach(p => { ccySet.add(p.slice(0,3)); ccySet.add(p.slice(3,6)); });
+    const ccys = [...ccySet].sort();
+    const N = ccys.length;
+
+    // Basket vols
+    const basketVols = {};
+    ccys.forEach(ccy => {
+        const vol2s = [];
+        Object.entries(pairVols).forEach(([pair, vol]) => {
+            if (pair.slice(0,3) === ccy || pair.slice(3,6) === ccy) vol2s.push(vol*vol);
+        });
+        basketVols[ccy] = vol2s.length > 0 ? Math.sqrt(vol2s.reduce((a,b)=>a+b,0)/vol2s.length) : 0;
+    });
+
+    // Basket correlation matrix with scaling
+    const scaleFactor = (N / (N-1)) * (N / (N-1));
+    const corrMatrix = {};
+    ccys.forEach(c1 => { corrMatrix[c1] = {}; ccys.forEach(c2 => corrMatrix[c1][c2] = c1===c2 ? 1.0 : null); });
+
+    // Helper: find pair vol for two currencies
+    function getPairVol(c1, c2) {
+        const p1 = c1+c2, p2 = c2+c1;
+        return pairVols[p1] || pairVols[p2] || null;
+    }
+
+    for (let i = 0; i < ccys.length; i++) {
+        for (let j = i+1; j < ccys.length; j++) {
+            const c1 = ccys[i], c2 = ccys[j];
+            const pv = getPairVol(c1, c2);
+            if (pv && basketVols[c1] > 0 && basketVols[c2] > 0) {
+                let rho = (basketVols[c1]**2 + basketVols[c2]**2 - scaleFactor * pv**2) / (2*basketVols[c1]*basketVols[c2]);
+                rho = Math.max(-1, Math.min(1, rho));
+                corrMatrix[c1][c2] = rho;
+                corrMatrix[c2][c1] = rho;
+            }
+        }
+    }
+
+    // Shock: back out the new basket correlation for the shocked pair
+    const sLhs = shockPair.slice(0,3), sRhs = shockPair.slice(3,6);
+    const scale = (N-1)/N;
+    const oldPairVol = pairVols[shockPair];
+    const newPairVol = oldPairVol + shockDelta/100;
+
+    const bvL = basketVols[sLhs], bvR = basketVols[sRhs];
+    if (!bvL || !bvR) {
+        document.getElementById('whatif-results').innerHTML =
+            `<div class="card" style="color:var(--red);">Cannot compute basket vols for ${sLhs} or ${sRhs}.</div>`;
+        return;
+    }
+
+    const oldRho = corrMatrix[sLhs] && corrMatrix[sLhs][sRhs];
+    const newRho_raw = (bvL**2 + bvR**2 - scaleFactor * newPairVol**2) / (2*bvL*bvR);
+    const newRho = Math.max(-1, Math.min(1, newRho_raw));
+    const deltaRho = newRho - (oldRho || 0);
+
+    // Propagate: for each pair, compute Δρ and ΔVol
+    const results = [];
+
+    for (let i = 0; i < ccys.length; i++) {
+        for (let j = i+1; j < ccys.length; j++) {
+            const c1 = ccys[i], c2 = ccys[j];
+            const pv = getPairVol(c1, c2);
+            if (!pv) continue;
+
+            const currentRho = corrMatrix[c1][c2];
+            if (currentRho === null) continue;
+
+            let dRho = 0;
+            let path = '';
+
+            if ((c1 === sLhs && c2 === sRhs) || (c1 === sRhs && c2 === sLhs)) {
+                dRho = deltaRho;
+                path = 'direct (input)';
+            } else if (c1 === sLhs || c2 === sLhs) {
+                // Pair involves the LHS of the shock
+                const other = c1 === sLhs ? c2 : c1;
+                const rhoOtherRhs = corrMatrix[other] && corrMatrix[other][sRhs];
+                if (rhoOtherRhs != null) {
+                    dRho = rhoOtherRhs * deltaRho;
+                    path = `ρ(${other},${sRhs})=${rhoOtherRhs.toFixed(2)} × Δρ`;
+                }
+            } else if (c1 === sRhs || c2 === sRhs) {
+                // Pair involves the RHS of the shock
+                const other = c1 === sRhs ? c2 : c1;
+                const rhoOtherLhs = corrMatrix[other] && corrMatrix[other][sLhs];
+                if (rhoOtherLhs != null) {
+                    dRho = rhoOtherLhs * deltaRho;
+                    path = `ρ(${other},${sLhs})=${rhoOtherLhs.toFixed(2)} × Δρ`;
+                }
+            } else {
+                continue; // neither currency in the shock pair — skip (second-order)
+            }
+
+            const adjRho = Math.max(-1, Math.min(1, currentRho + dRho));
+            const bv1 = basketVols[c1], bv2 = basketVols[c2];
+            const oldVol = pv * 100;
+            const newVar = bv1**2 + bv2**2 - 2*adjRho*bv1*bv2;
+            const newVol = newVar > 0 ? Math.sqrt(newVar) * scale * 100 : 0;
+            const dVol = newVol - oldVol;
+
+            const pairName = Object.keys(pairVols).find(p =>
+                (p.slice(0,3)===c1 && p.slice(3,6)===c2) || (p.slice(0,3)===c2 && p.slice(3,6)===c1)
+            ) || c1+c2;
+
+            results.push({ pair: pairName, c1, c2, oldVol, newVol, dVol, oldRho: currentRho, dRho, newRho: adjRho, path });
+        }
+    }
+
+    results.sort((a,b) => Math.abs(b.dVol) - Math.abs(a.dVol));
+
+    // Render
+    let html = '';
+
+    // Summary
+    html += '<div class="card">';
+    html += `<div class="section-title">Correlation Shift: ${shockPair} ${shockDelta >= 0 ? '+' : ''}${shockDelta.toFixed(2)}v</div>`;
+    html += `<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">`;
+    html += `${shockPair} vol: ${(oldPairVol*100).toFixed(2)}% → ${(newPairVol*100).toFixed(2)}% · `;
+    html += `ρ_basket(${sLhs},${sRhs}): ${oldRho != null ? oldRho.toFixed(3) : '?'} → ${newRho.toFixed(3)} · `;
+    html += `Δρ = ${deltaRho.toFixed(4)} · N=${N} currencies · Scale=(N/(N-1))²=${scaleFactor.toFixed(3)}`;
+    html += `</div>`;
+
+    // Results table
+    const maxDVol = Math.max(...results.map(r => Math.abs(r.dVol)), 0.05);
+
+    html += '<table class="data-table"><thead><tr>';
+    ['Pair','Vol Now','Vol New','ΔVol','ρ Now','Δρ','ρ New','Propagation'].forEach(h => html += `<th>${h}</th>`);
+    html += '</tr></thead><tbody>';
+
+    results.forEach(r => {
+        html += '<tr>';
+        html += `<td>${r.pair}</td>`;
+        html += `<td>${r.oldVol.toFixed(2)}</td>`;
+        html += `<td>${r.newVol.toFixed(2)}</td>`;
+        html += td(fmtSigned(r.dVol, 3), true, maxDVol);
+        html += `<td>${r.oldRho.toFixed(2)}</td>`;
+        html += td(fmtSigned(r.dRho, 4), true, Math.abs(deltaRho));
+        html += `<td>${r.newRho.toFixed(3)}</td>`;
+        html += `<td style="color:var(--text-secondary); font-size:10px;">${r.path}</td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+
+    document.getElementById('whatif-results').innerHTML = html;
+}
+
 // Tab switching
 // ─────────────────────────────────────────────────────────────────
 

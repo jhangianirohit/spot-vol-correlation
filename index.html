@@ -1168,77 +1168,78 @@ function computeBasket() {
     html += '</tbody></table></div>';
 
     // ── Basket Vol Decomposition Table ──
-    // ── Pair Variance Attribution with toggle ──
-    const decompPairs = Object.keys(pairs).sort();
-    const decompData = decompPairs.map(pair => {
-        const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
-        const [wL, wR] = pairWeights(pair);
-        return { pair, lhs, rhs, vol: pairs[pair].vol, bvL: basketVols[lhs]*100, bvR: basketVols[rhs]*100, pctL: wL*100, pctR: wR*100 };
-    });
+    // ── Pair Variance Attribution (by currency only) ──
+    // For each currency section, the section currency is always LHS.
+    // Pair names are flipped if needed (e.g., GBPAUD → AUDGBP in the AUD section).
+    // Shows: pair vol, LHS basket vol, RHS basket vol, %LHS, %RHS, LHS vol contrib, RHS vol contrib, bar
 
-    function vaRow(d) {
-        let r = '<tr>';
-        r += `<td>${d.pair}</td>`;
-        r += `<td>${d.vol.toFixed(2)}</td>`;
-        r += `<td>${d.bvL.toFixed(2)}%</td>`;
-        r += `<td>${d.bvR.toFixed(2)}%</td>`;
-        r += `<td>${d.pctL.toFixed(0)}%</td>`;
-        r += `<td>${d.pctR.toFixed(0)}%</td>`;
-        r += '<td style="width:160px; padding:2px 4px;">';
-        r += `<div style="display:flex; height:12px; border-radius:2px; overflow:hidden;">`;
-        r += `<div style="width:${d.pctL.toFixed(0)}%; background:var(--cyan); opacity:0.7;"></div>`;
-        r += `<div style="width:${d.pctR.toFixed(0)}%; background:var(--yellow); opacity:0.7;"></div>`;
-        r += `</div></td></tr>`;
-        return r;
-    }
+    html += `<div class="card"><div class="section-title">Pair Variance Attribution (${tenor})</div>`;
 
-    function vaTableHeader() {
-        let h = '<table class="data-table"><thead><tr>';
-        ['Pair','Pair Vol','Basket LHS','Basket RHS','% LHS','% RHS',''].forEach(c => h += `<th>${c}</th>`);
-        h += '</tr></thead><tbody>';
-        return h;
-    }
-
-    // View 1: all pairs alphabetically
-    let vaViewAll = '<div id="va-view-all">';
-    vaViewAll += vaTableHeader();
-    decompData.forEach(d => vaViewAll += vaRow(d));
-    vaViewAll += '</tbody></table></div>';
-
-    // View 2: grouped by currency
-    const vaCcyPairs = {};
-    ccys.forEach(c => vaCcyPairs[c] = []);
-    decompData.forEach(d => {
-        vaCcyPairs[d.lhs].push(d);
-        vaCcyPairs[d.rhs].push(d);
-    });
-
-    let vaViewCcy = '<div id="va-view-ccy" style="display:none;">';
     const vaCcyOrder = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
     vaCcyOrder.forEach(ccy => {
-        const cp = vaCcyPairs[ccy];
-        if (!cp || cp.length === 0) return;
+        // Find all pairs involving this currency
+        const ccyRows = [];
+        Object.entries(pairs).forEach(([pair, d]) => {
+            const lhs = pair.slice(0,3), rhs = pair.slice(3,6);
+            if (lhs !== ccy && rhs !== ccy) return;
+
+            // Flip so section currency is always LHS
+            const isLhs = lhs === ccy;
+            const displayPair = isLhs ? pair : (rhs + lhs);
+            const myCcy = ccy;
+            const otherCcy = isLhs ? rhs : lhs;
+
+            const bvMy = basketVols[myCcy] * 100;
+            const bvOther = basketVols[otherCcy] * 100;
+            const totalBV2 = bvMy*bvMy + bvOther*bvOther;
+            const pctMy = totalBV2 > 0 ? (bvMy*bvMy / totalBV2) * 100 : 50;
+            const pctOther = 100 - pctMy;
+            // Vol contribution: % × pair vol
+            const volMy = pctMy / 100 * d.vol;
+            const volOther = pctOther / 100 * d.vol;
+
+            ccyRows.push({
+                displayPair, vol: d.vol, myCcy, otherCcy,
+                bvMy, bvOther, pctMy, pctOther, volMy, volOther
+            });
+        });
+
+        if (ccyRows.length === 0) return;
+        ccyRows.sort((a,b) => a.displayPair.localeCompare(b.displayPair));
+
         const b = ccyBetas[ccy];
         const bv = basketVols[ccy] * 100;
-        vaViewCcy += `<div style="margin-top:16px; margin-bottom:4px;">`;
-        vaViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
-        vaViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
-        vaViewCcy += `Basket Vol: ${bv.toFixed(2)}% · β: ${fmtSigned(b)}`;
-        vaViewCcy += `</span></div>`;
-        vaViewCcy += vaTableHeader();
-        cp.forEach(d => vaViewCcy += vaRow(d));
-        vaViewCcy += '</tbody></table>';
-    });
-    vaViewCcy += '</div>';
+        html += `<div style="margin-top:16px; margin-bottom:4px;">`;
+        html += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
+        html += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
+        html += `Basket Vol: ${bv.toFixed(2)}% · β: ${fmtSigned(b)}`;
+        html += `</span></div>`;
 
-    html += '<div class="card">';
-    html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
-    html += `<div class="section-title" style="margin:0; border:none; padding:0;">Pair Variance Attribution (${tenor})</div>`;
-    html += '<div class="btn-row" style="margin:0;">';
-    html += '<button class="btn" id="btn-va-all" onclick="toggleVAView(\'all\')" style="font-size:9px; padding:4px 10px; background:var(--cyan); color:#000;">All Pairs</button>';
-    html += '<button class="btn" id="btn-va-ccy" onclick="toggleVAView(\'ccy\')" style="font-size:9px; padding:4px 10px;">By Currency</button>';
-    html += '</div></div>';
-    html += vaViewAll + vaViewCcy;
+        html += '<table class="data-table"><thead><tr>';
+        ['Pair','Vol','Bsk '+ccy,'Bsk Other','% '+ccy,'% Other',ccy+' Vol','Other Vol',''].forEach(c => html += `<th>${c}</th>`);
+        html += '</tr></thead><tbody>';
+
+        ccyRows.forEach(d => {
+            html += '<tr>';
+            html += `<td>${d.displayPair}</td>`;
+            html += `<td>${d.vol.toFixed(2)}</td>`;
+            html += `<td>${d.bvMy.toFixed(2)}</td>`;
+            html += `<td>${d.bvOther.toFixed(2)}</td>`;
+            html += `<td>${d.pctMy.toFixed(0)}%</td>`;
+            html += `<td>${d.pctOther.toFixed(0)}%</td>`;
+            html += `<td>${d.volMy.toFixed(2)}</td>`;
+            html += `<td>${d.volOther.toFixed(2)}</td>`;
+            html += '<td style="width:140px; padding:2px 4px;">';
+            html += `<div style="display:flex; height:12px; border-radius:2px; overflow:hidden;">`;
+            html += `<div style="width:${d.pctMy.toFixed(0)}%; background:var(--cyan); opacity:0.7;"></div>`;
+            html += `<div style="width:${d.pctOther.toFixed(0)}%; background:var(--yellow); opacity:0.7;"></div>`;
+            html += `</div></td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+    });
+
     html += '</div>';
 
     // ── NxN Basket Correlation Matrix (scaling method) ──

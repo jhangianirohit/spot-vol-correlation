@@ -288,6 +288,8 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 
 <p>This means the implied ν_log is an <em>upper bound</em> on the true diffusive vol-of-vol. The gap between implied and realized ν_log includes the jump premium and model approximation error.</p>
 
+<p><strong>What it does <em>not</em> absorb: skew.</strong> One might worry that big-RR pairs have inflated BFs (skew curvature feeding the wings), contaminating ν_log with β². MC says no — the fly prices vol variance <em>orthogonal to spot</em>, and the β² contribution is tiny and slightly negative (Section 10). BF-implied ν_log reads the idiosyncratic vol-of-vol cleanly.</p>
+
 <!-- ═══════════════════════════════════════════════════════════ -->
 <h2>8. Comparing RR and BF Frameworks</h2>
 
@@ -300,6 +302,7 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
         <tr><td>Scaling factor</td><td>0.50 (vanna decay)</td><td>0.337 (volga decay)</td></tr>
         <tr><td>MC recovery</td><td>~97%</td><td>~90%</td></tr>
         <tr><td>Sign</td><td>Can be ± (directional)</td><td>Always positive (magnitude)</td></tr>
+        <tr><td>Spans</td><td>Spot-driven vol risk (β)</td><td>Spot-orthogonal vol risk (ν_idio)</td></tr>
         <tr><td>Depends on</td><td>RR, ATM, √T</td><td>BF, ATM, T</td></tr>
     </tbody>
 </table>
@@ -307,35 +310,69 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 <p>Note the different T dependence: β scales with 1/√T (vanna P&L accumulates as √T), while ν² scales with 1/T (volga P&L accumulates linearly in T through the (Δσ)² = σ² ν² dt term).</p>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
-<h2>9. Currency-Level ν_log Decomposition</h2>
+<h2>9. Currency-Level Decomposition — One Global Vol Factor + Idiosyncratic</h2>
 
-<p>Just as we decompose RR into currency betas, we decompose BF into currency-level vol-of-vols. For each pair AB:</p>
+<p>Just as we decompose RR into currency betas, we decompose BF into currency-level vol-of-vols. But vol-of-vol has a structural feature skew does not: <em>it doesn't diversify in crosses</em>. When vol-of-vol hits, it hits everything — EURUSD, USDJPY and EURJPY vols all start swinging together. The data says so too: observed cross ν's sit at the same level as USD-pair ν's, where independent currency vol-of-vols would predict crosses ~30% lower.</p>
+
+<p>So each currency's vol shock carries one <em>global</em> vol factor, shared by all currencies, plus an idiosyncratic part:</p>
 
 <div class="formula">
-    ν²_AB = w_A × ν_A² + w_B × ν_B²
+    d ln σ_i = ν_g × dW_global + η_i × dW_i
 </div>
 
-<p>This assumes ρ_vol = 0 (independent currency vol-of-vols) as a baseline. The weights w_A, w_B are the same basket vol weights used for β — <em>not squared</em>.</p>
+<p>Aggregating to a pair with the basket variance weights (w_A + w_B = 1):</p>
 
-<h3>Why weighted average, not portfolio variance?</h3>
+<div class="formula">
+    ν²_AB = ν_g² + w_A² × η_A² + w_B² × η_B²
+</div>
 
-<p>An earlier version used w² weights (the portfolio variance formula: Var(wX) = w²Var(X)). This systematically underpredicted every pair's BF because w_A² + w_B² < 1 when w_A + w_B = 1. For example, a 50/50 pair would have predicted ν² = 0.25ν_A² + 0.25ν_B² — only half the average.</p>
+<p>The global factor passes through <em>undiversified</em> — its weights sum to one — while the idiosyncratic parts combine in quadrature (w² weights) and partially cancel. That one feature reproduces the empirical fact the old ρ_vol = 0 model could not: crosses are not calmer than their legs in vol-of-vol terms.</p>
 
-<p>The correct formula is a <em>weighted average</em> of ν² values. The pair's vol-of-vol² is a blend of each currency's vol-of-vol², weighted by how much each currency drives the pair. If a pair is 70% driven by AUD and 30% by GBP, its ν² should be 70% of AUD's ν² + 30% of GBP's ν² — not 49% + 9%.</p>
+<h3>A correction along the way</h3>
 
-<div class="insight"><strong>Comparison with β:</strong> Both use the same generic basket weights w_A, w_B. β combines them linearly (β = w_A × β_A − w_B × β_B) because skew is directional. ν² combines them as a weighted average (ν² = w_A × ν_A² + w_B × ν_B²) because vol-of-vol is a magnitude — each currency contributes proportionally to the pair's vol uncertainty.</div>
+<p>An earlier version of this page argued for plain-w "weighted average" weights instead of w², because w² "systematically underpredicted every pair's BF". That was a symptom patch: with weights summing to one, the linear-w formula behaves like perfectly correlated currency vol-of-vols (ρ_vol ≈ 1) — it kept the level right for the wrong reason. The global factor is the honest version of the same fact: it makes the common component explicit and lets the idiosyncratic parts combine correctly in quadrature.</p>
 
-<p>Solve for currency ν² values via non-negative least squares (ν must be positive, unlike β which can be negative). The residuals flag pairs with excess or deficient BF relative to what the currency vol-of-vols predict.</p>
+<h3>Identification — the BF analog of Σβ = 0</h3>
+
+<p>The split between ν_g and a uniform lift of all the η² is nearly flat in the data (the w² sums hover around 0.5 for most pairs) — the same disease as the unidentified level of the betas, which we pinned with Σβ = 0. The anchor here: scan ν_g, solve the η² ≥ 0 system at each grid point (non-negative least squares), and on the RMSE plateau take the <em>largest</em> ν_g. The common level lives in the global factor; the η's carry only relative structure.</p>
 
 <div class="example">
     <span class="label">Results (1M, 8 currencies, 16 pairs)</span>
-    RMSE of BF residuals: 0.022% — much tighter than β residuals (0.24%).<br><br>
-    This suggests the BF surface is more internally consistent than the RR surface.<br>
-    The "cross-pair BF mispricing" signal is smaller than the RR signal.
+    ν_g ≈ 1.79 — <span class="val">the global factor carries ~80% of average pair vol-of-vol variance</span>.<br>
+    Idio η ranking: JPY 1.80, NZD 1.39, USD 1.27, AUD 1.11, CHF 0.89 — EUR, GBP, CNH ≈ pure global factor.<br>
+    RMSE of BF residuals: 0.025%.<br><br>
+    The tool shows ν_g and the global share above the currency table, with η (idio) and ν total = √(ν_g² + η²) per currency.
 </div>
 
+<div class="insight"><strong>Reading the residuals:</strong> AUDNZD comes out over-predicted while the risk crosses (AUDJPY, NZDJPY, NZDUSD) under-predict. That's the stochastic-correlation channel: tight bloc pairs feel the global vol factor less, because their spot correlation rises exactly when global vol does. A per-pair global loading tied to spot correlation is the natural next extension.</div>
+
 <!-- ═══════════════════════════════════════════════════════════ -->
-<h2>10. Summary</h2>
+<h2>10. Does Skew Feed the Fly? (β² and the Butterfly)</h2>
+
+<p>Desk intuition says a long fly is "long RR gamma": vanna-flat at inception, but as spot rallies the position picks up vanna — it gets longer RR. If vol genuinely responds to spot (β ≠ 0), that developing vanna pays. Shouldn't the fly then be worth more in a high-β pair?</p>
+
+<p>In our units the question is sharp, because β <em>is</em> a vol-of-vol. β is vol points per 1% spot move, and spot's annualized 1σ move in percent is σ itself — so the spot-driven part of dσ/σ has annualized stdev of exactly β:</p>
+
+<div class="formula">
+    dσ / σ = β × dW_spot + ν_idio × dW_idio &nbsp;&nbsp;⇒&nbsp;&nbsp; ν_total² = β² + ν_idio²
+</div>
+
+<p>If the fly priced <em>total</em> vol variance, fair BF would be 0.075 × ATM × T × (β² + ν_idio²). The MC says it does not:</p>
+
+<div class="example">
+    <span class="label">MC verdict (bf_beta_convexity.py)</span>
+    Delta-hedged vega-neutral fly (25d strangle − vega-ratio × straddle) under dσ/σ = β·dW_spot + ν·dW_idio.<br>
+    ν_idio² enters the fly with coefficient ≈ +0.90 (the validated baseline).<br>
+    <span class="val">β² enters with coefficient ≈ −0.11 — small and negative, not +1.</span><br><br>
+    At a hefty β = 1.0 the BF correction is ~0.006 vol pts — under a basis point.
+</div>
+
+<p>The economics: <em>the fly prices vol variance orthogonal to spot.</em> Spot-driven vol moves are spanned by spot — hedgeable, and already charged for in the RR through vanna. Conditional on the spot path, β-driven vol carries no remaining uncertainty, so it commands no convexity premium. The slight negative is the SABR (2 − 3ρ²) effect: at |ρ| = 1, the vol-of-vol budget is spent on skew — with interest.</p>
+
+<div class="insight"><strong>Division of labour:</strong> RR prices the spot-spanned vol risk (β); BF prices the spot-orthogonal vol risk (ν_idio). The "long RR gamma" carry on a long fly is real — but it is fully paid for in fair value. Practical upshot: BF-implied ν_log is clean of skew at realistic β, and the decomposition in Section 9 operates on genuinely orthogonal quantities.</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>11. Summary</h2>
 
 <p><span class="step-num">1</span> The BF prices vol-of-vol through the volga P&L mechanism</p>
 <p><span class="step-num">2</span> For 25d options: <em>ν_log = √(BF / (0.075 × ATM × T))</em></p>
@@ -343,7 +380,8 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 <p><span class="step-num">4</span> Verified by MC: vega-neutral BF delta-hedged → 90% premium recovery</p>
 <p><span class="step-num">5</span> Lognormal model: vol moves scale with vol level, can't go negative</p>
 <p><span class="step-num">6</span> Implied ν_log absorbs jump premium — it's an upper bound on diffusive vol-of-vol</p>
-<p><span class="step-num">7</span> Currency-level decomposition via ν² = w × ν_ccy² (weighted average, not quadrature)</p>
+<p><span class="step-num">7</span> The fly prices vol variance <em>orthogonal to spot</em> — β²/skew adds essentially nothing (slightly negative); the RR owns the spot-spanned part</p>
+<p><span class="step-num">8</span> Currency decomposition: ν²_AB = ν_g² + w_A²η_A² + w_B²η_B² — one global vol factor (~80% of variance) passing through crosses undiversified, plus idio in quadrature, anchored by max-ν_g on the RMSE plateau (the Σβ = 0 analog)</p>
 
 <div class="footer">
     Built with Claude · <a href="index.html" style="color: var(--cyan);">Tool</a> · <a href="explainer.html" style="color: var(--cyan);">RR / β Explainer</a>

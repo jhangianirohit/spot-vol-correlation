@@ -1539,8 +1539,16 @@ function computeBasket() {
         }
     }
 
-    // ═══════════ ν_log BASKET SOLVE ═══════════
-    // For each pair: ν²_obs = w_L × ν_L² + w_R × ν_R²  (weighted average, ρ_vol=0)
+    // ═══════════ ν_log BASKET SOLVE — GLOBAL + IDIOSYNCRATIC ═══════════
+    // Each currency's log-vol shock: d ln σ_i = ν_g·dW_g + η_i·dW_i
+    // (one GLOBAL vol Brownian shared by all currencies + idio shocks).
+    // Pair (variance weights, w_L + w_R = 1):
+    //     ν²_AB = ν_g² + w_L²·η_L² + w_R²·η_R²
+    // The global factor passes through undiversified (weights sum to 1) —
+    // which is why cross ν's don't sit below component ν's.
+    // ν_g vs a uniform lift of all η² is near-collinear, so: scan ν_g,
+    // NNLS for η² ≥ 0 at each point, take max ν_g on the BF-RMSE plateau
+    // (level lives in the global factor — analog of the Σβ=0 anchor).
     const hasBF = pairList.some(p => p.obsNu != null);
     if (hasBF) {
         const nu_rows = [];
@@ -1550,64 +1558,111 @@ function computeBasket() {
         pairList.forEach(p => {
             if (p.obsNu == null) return;
             const row = new Array(N).fill(0);
-            row[ccyIdx[p.lhs]] = p.wL;
-            row[ccyIdx[p.rhs]] = p.wR;
+            row[ccyIdx[p.lhs]] = p.wL * p.wL;
+            row[ccyIdx[p.rhs]] = p.wR * p.wR;
             nu_rows.push(row);
             nu_b.push(p.obsNu * p.obsNu);
             nuPairs.push(p);
         });
 
         if (nu_rows.length >= N) {
-            // Non-negative least squares via iterative projection
-            // Solve A × ν² = b where ν² >= 0
-            let nu2 = new Array(N).fill(1.0); // initial guess
-            for (let iter = 0; iter < 200; iter++) {
-                // Gradient: AT(Ax - b)
-                const Ax = nu_rows.map(row => row.reduce((s,v,j) => s + v * nu2[j], 0));
-                const grad = new Array(N).fill(0);
-                for (let i = 0; i < N; i++) {
-                    for (let k = 0; k < nu_rows.length; k++) {
-                        grad[i] += nu_rows[k][i] * (Ax[k] - nu_b[k]);
+            const T_bf = tenorToT(tenor);
+
+            // NNLS via projected gradient: min ||A·x − b||, x ≥ 0
+            // step = 1/||A||²_F (safe upper bound on the Lipschitz constant)
+            const frob2 = nu_rows.reduce((s,row) => s + row.reduce((t,v) => t + v*v, 0), 0);
+            const nnlsStep = 1 / Math.max(frob2, 1e-9);
+            function nnlsSolve(rows, b) {
+                let x = new Array(N).fill(0.5);
+                for (let iter = 0; iter < 2000; iter++) {
+                    const Ax = rows.map(row => row.reduce((s,v,j) => s + v * x[j], 0));
+                    let moved = 0;
+                    for (let i = 0; i < N; i++) {
+                        let g = 0;
+                        for (let k = 0; k < rows.length; k++) g += rows[k][i] * (Ax[k] - b[k]);
+                        const xn = Math.max(0, x[i] - nnlsStep * g);
+                        moved = Math.max(moved, Math.abs(xn - x[i]));
+                        x[i] = xn;
                     }
+                    if (moved < 1e-10) break;
                 }
-                const step = 0.001;
-                for (let i = 0; i < N; i++) {
-                    nu2[i] = Math.max(0, nu2[i] - step * grad[i]);
-                }
+                return x;
             }
 
-            const ccyNu = {};
-            ccys.forEach((c, i) => ccyNu[c] = Math.sqrt(nu2[i]));
+            function bfRmseFor(nuG2, eta2) {
+                let ss = 0;
+                nuPairs.forEach((p, k) => {
+                    const pred2 = nuG2 + nu_rows[k].reduce((s,v,j) => s + v * eta2[j], 0);
+                    const predBF = fairBF(Math.sqrt(Math.max(pred2, 0)), p.vol, T_bf);
+                    ss += (p.bf - predBF) * (p.bf - predBF);
+                });
+                return Math.sqrt(ss / nuPairs.length);
+            }
+
+            // Grid scan over the global factor
+            const nuGMax = Math.max(...nuPairs.map(p => p.obsNu));
+            const NG = 101;
+            let scan = [];
+            for (let gi = 0; gi < NG; gi++) {
+                const nuG = nuGMax * gi / (NG - 1);
+                const b = nu_b.map(v => v - nuG * nuG);
+                const eta2 = nnlsSolve(nu_rows, b);
+                scan.push({ nuG, eta2, rmse: bfRmseFor(nuG * nuG, eta2) });
+            }
+            const rmseMin = Math.min(...scan.map(s => s.rmse));
+            // max-ν_g point on the plateau (within 2% of min RMSE)
+            const best = scan.filter(s => s.rmse <= rmseMin * 1.02).pop();
+            const nuG = best.nuG;
+            const eta2 = best.eta2;
+            const bfRmseModel = best.rmse;
+
+            const ccyEta = {};
+            const ccyNu = {};   // TOTAL ν per currency = √(ν_g² + η²)
+            ccys.forEach((c, i) => {
+                ccyEta[c] = Math.sqrt(eta2[i]);
+                ccyNu[c] = Math.sqrt(nuG * nuG + eta2[i]);
+            });
+            const avgObsNu2 = nu_b.reduce((s,v) => s + v, 0) / nu_b.length;
+            const globalShare = nuG * nuG / avgObsNu2;
 
             // Predicted ν and BF for each pair
             nuPairs.forEach(p => {
-                const nuL = ccyNu[p.lhs] || 0;
-                const nuR = ccyNu[p.rhs] || 0;
-                const predNu2 = p.wL*nuL*nuL + p.wR*nuR*nuR;
+                const eL = ccyEta[p.lhs] || 0;
+                const eR = ccyEta[p.rhs] || 0;
+                const predNu2 = nuG*nuG + p.wL*p.wL*eL*eL + p.wR*p.wR*eR*eR;
                 p.predNu = Math.sqrt(predNu2);
-                p.predBF = fairBF(p.predNu, p.vol, tenorToT(tenor));
+                p.predBF = fairBF(p.predNu, p.vol, T_bf);
                 p.residualBF = p.bf - p.predBF;
             });
 
             // Currency ν table
-            html += '<div class="card"><div class="section-title">Currency ν_log — Vol-of-Vol (' + tenor + ')</div>';
+            html += '<div class="card"><div class="section-title">Currency ν_log — Global + Idiosyncratic Vol-of-Vol (' + tenor + ')</div>';
+            html += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--cyan); margin-bottom:10px;">`;
+            html += `Global vol factor ν_g = ${nuG.toFixed(2)} · carries ${(globalShare*100).toFixed(0)}% of avg pair vol-of-vol variance`;
+            html += `<span style="color:var(--text-muted);"> · ν²_pair = ν_g² + w_L²η_L² + w_R²η_R²</span></div>`;
             html += '<table class="data-table"><thead><tr>';
-            ['Currency','Basket Vol','ν_log','Daily σ move','Interpretation'].forEach(h => html += `<th>${h}</th>`);
+            ['Currency','Basket Vol','η (idio)','ν total','Daily σ move','Interpretation'].forEach(h => html += `<th>${h}</th>`);
             html += '</tr></thead><tbody>';
 
             const sortedNu = [...ccys].sort((a,b) => (ccyNu[b]||0) - (ccyNu[a]||0));
             const maxNu = Math.max(...Object.values(ccyNu), 1);
+            const maxEta = Math.max(...Object.values(ccyEta), 0.5);
 
             sortedNu.forEach(ccy => {
+                const eta = ccyEta[ccy] || 0;
                 const nu = ccyNu[ccy] || 0;
                 const bv = basketVols[ccy] * 100;
                 const daily = dailyVolStdev(bv, nu);
+                const interp = eta < 0.05
+                    ? 'pure global-factor vol-of-vol'
+                    : `${(eta*eta/(nu*nu)*100).toFixed(0)}% of its vol-of-vol variance is own-currency`;
                 html += '<tr>';
                 html += `<td>${ccy}</td>`;
                 html += `<td>${bv.toFixed(2)}%</td>`;
+                html += td(eta.toFixed(2), true, maxEta);
                 html += td(nu.toFixed(2), true, maxNu);
                 html += `<td>${daily.toFixed(2)}v/day</td>`;
-                html += `<td style="color:var(--text-secondary); font-size:10px;">Daily 1σ vol move ≈ ${daily.toFixed(2)} vol pts</td>`;
+                html += `<td style="color:var(--text-secondary); font-size:10px;">${interp}</td>`;
                 html += '</tr>';
             });
             html += '</tbody></table></div>';

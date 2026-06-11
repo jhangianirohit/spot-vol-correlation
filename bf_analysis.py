@@ -26,6 +26,17 @@ import numpy as np
 
 BF_CONSTANT = 0.075  # 0.5 × 0.337 × 0.9098 × 0.5
 
+# β² contribution to the fly, MC-measured (bf_beta_convexity.py).
+# Spot-driven vol-of-vol (= β in our units) does NOT add to the fly the
+# way idiosyncratic ν does — it contributes slightly NEGATIVELY:
+#   fair BF = 0.075 × ATM × T × (ν_idio² + BETA_BF_COEFF × β²)
+# Measured: eff_ν² slope of −0.107·β² vs +0.90·ν_idio² ⇒ ratio ≈ −0.12.
+# Economic reading: the fly prices vol variance ORTHOGONAL to spot;
+# spot-spanned vol risk is hedgeable (and charged) via the RR, and at
+# |ρ|=1 the vol-of-vol budget is spent on skew with interest (SABR
+# 2−3ρ² < 0). For realistic β (≤1) the correction is sub-basis-point.
+BETA_BF_COEFF = -0.12
+
 TENOR_DAYS = {
     'ON':1,'1D':1,'1W':7,'2W':14,'3W':21,'1M':30,'2M':60,
     '3M':91,'6M':182,'9M':274,'1Y':365,'2Y':730
@@ -37,7 +48,7 @@ def tenor_to_T(tenor):
     return d / 365 if d else None
 
 
-def implied_nu_log(bf, atm, T_years):
+def implied_nu_log(bf, atm, T_years, beta=0.0):
     """
     Extract implied lognormal vol-of-vol from 25d butterfly.
 
@@ -45,6 +56,10 @@ def implied_nu_log(bf, atm, T_years):
         bf: 25d butterfly in same units as atm (e.g., both in %)
         atm: ATM vol in same units as bf
         T_years: time to expiry in years
+        beta: pair β (vol points per 1% spot move). If given, strips the
+              small negative β² convexity contribution, so the result is
+              the spot-ORTHOGONAL (idiosyncratic) vol-of-vol:
+              ν_idio² = BF/(0.075·ATM·T) − BETA_BF_COEFF·β²
 
     Returns:
         ν_log: implied lognormal vol-of-vol (annualized, dimensionless)
@@ -52,12 +67,18 @@ def implied_nu_log(bf, atm, T_years):
     """
     if atm <= 0 or T_years <= 0 or bf <= 0:
         return None
-    return np.sqrt(bf / (BF_CONSTANT * atm * T_years))
+    nu2 = bf / (BF_CONSTANT * atm * T_years) - BETA_BF_COEFF * beta**2
+    if nu2 < 0:
+        return None
+    return np.sqrt(nu2)
 
 
-def fair_bf(nu_log, atm, T_years):
-    """Inverse: compute fair BF from ν_log."""
-    return BF_CONSTANT * atm * T_years * nu_log**2
+def fair_bf(nu_log, atm, T_years, beta=0.0):
+    """Fair BF from idiosyncratic ν_log and (optionally) pair β.
+
+    fair BF = 0.075 × ATM × T × (ν_idio² + BETA_BF_COEFF × β²), floored at 0.
+    """
+    return max(0.0, BF_CONSTANT * atm * T_years * (nu_log**2 + BETA_BF_COEFF * beta**2))
 
 
 def daily_vol_stdev(atm_pct, nu_log):

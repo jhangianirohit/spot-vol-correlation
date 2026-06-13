@@ -35,8 +35,8 @@ both flavours use the factor model for the OFF-diagonal:
     Cov(d ln σ_i, d ln σ_j) = ν_g² + Σ_{s shared} w_{i,s}·w_{j,s}·η_s²
     ρ_vol(i,j) = Cov / (ν_i^model · ν_j^model)
 
-market − model is the tradeable signal: cross fly rich vs its legs ⇒
-market pricing more vol-of-correlation than the factor model implies.
+model − market is the tradeable signal (positive = cross fly cheap vs its
+legs ⇒ buy to converge up to the model; negative = rich, sell).
 
 Caveat: the off-diagonal ρ_vol is model-based, and the linearization is
 first-order in vol moves. Treat the level as indicative; the
@@ -162,7 +162,7 @@ def vol_of_correlation(pairs_data, tenor, g=None):
             'daily_model': vovc_model / np.sqrt(252),
             'daily_market': (abs(vovc_market) / np.sqrt(252)
                              * (1 if vovc_market >= 0 else -1)),
-            'signal': vovc_market - vovc_model,  # market rich (+) / cheap (−)
+            'signal': vovc_model - vovc_market,  # model − market: + = cheap (buy), − = rich (sell)
         })
 
     return results
@@ -191,4 +191,4 @@ if __name__ == '__main__':
               f'{r["daily_market"]:8.4f}  {r["signal"]:+8.3f}')
 
     print(f'\n  VoVC = annualized stdev of implied correlation (corr units).')
-    print(f'  daily ≈ VoVC / 16.  signal = market − model (rich +, cheap −).')
+    print(f'  daily ≈ VoVC / 16.  signal = model − market (cheap +, rich −).')

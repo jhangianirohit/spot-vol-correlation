@@ -460,7 +460,7 @@ EURGBP\t3M\t5.00\t-0.15"""
                 chart_results = [r for r in all_results if r.residual is not None]
                 if chart_results:
                     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-                    st.subheader("Residual: Market - Predicted (bps)")
+                    st.subheader("Residual: Predicted - Market (bps)")
 
                     # Sort: by cross name, then by tenor chronologically
                     chart_results.sort(key=lambda r: (
@@ -545,4 +545,4 @@ EURGBP\t3M\t5.00\t-0.15"""
                     st.code(email_html, language="html")
                     st.success("Email HTML above — select all and copy, then paste into Outlook/Gmail as HTML.")
 
-            st.caption("Residual = Market RR − Predicted RR · Positive = cross RR cheap · Negative = rich")
+            st.caption("Residual = Predicted RR − Market RR · Positive = cross RR cheap, buy to converge · Negative = rich, sell")

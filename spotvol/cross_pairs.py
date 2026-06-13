@@ -156,7 +156,8 @@ def decompose_cross(
 
     residual = None
     if rr_cross_market is not None:
-        residual = rr_cross_market - predicted_rr
+        # convention: model − market (positive = market cheap, buy to converge)
+        residual = predicted_rr - rr_cross_market
 
     return CrossResult(
         cross=cross, tenor=tenor, leg1=leg1, leg2=leg2, sign=sign,

@@ -127,8 +127,9 @@ def solve_currency_nu(pairs_data, tenor, rho_vol=0.0):
         pred_bf = fair_bf(pred_nu, p['atm'], T)
         p['pred_nu'] = pred_nu
         p['pred_bf'] = pred_bf
-        p['residual_bf'] = p['bf'] - pred_bf
-        p['residual_nu'] = p['obs_nu'] - pred_nu
+        # convention: model − market (positive = market cheap, buy to converge)
+        p['residual_bf'] = pred_bf - p['bf']
+        p['residual_nu'] = pred_nu - p['obs_nu']
 
     return ccy_nu, bvols, pair_list
 
@@ -231,8 +232,9 @@ def solve_currency_nu_global(pairs_data, tenor, n_grid=201, plateau_tol=0.02):
         pred_nu = np.sqrt(max(pred_nu2, 0))
         pred_bf = fair_bf(pred_nu, o['atm'], T)
         pair_results.append({**o, 'pred_nu': pred_nu, 'pred_bf': pred_bf,
-                             'residual_bf': o['bf'] - pred_bf,
-                             'residual_nu': o['obs_nu'] - pred_nu})
+                             # convention: model − market (positive = market cheap, buy)
+                             'residual_bf': pred_bf - o['bf'],
+                             'residual_nu': pred_nu - o['obs_nu']})
 
     # share of average pair vol-of-vol variance carried by the global factor
     global_share = nu_g**2 / np.mean(nu2_obs)

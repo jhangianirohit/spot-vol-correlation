@@ -186,7 +186,8 @@ def solve_currency_betas(pairs_data, tenor):
             'obs_beta': obs_beta,
             'pred_beta': pred_beta,
             'pred_rr': pred_rr,
-            'residual': (rr_pct - pred_rr) if rr_pct is not None and pred_rr is not None else None,
+            # convention: model − market (positive = market cheap, buy to converge)
+            'residual': (pred_rr - rr_pct) if rr_pct is not None and pred_rr is not None else None,
         })
 
     return currency_betas, basket_vols, pair_results

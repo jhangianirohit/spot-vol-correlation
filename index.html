@@ -1509,6 +1509,65 @@ function computeBasket() {
             });
             html += '</tbody></table></div>';
 
+            // ── Implied Vol-of-Vol Correlation Matrices ──
+            // Renders ρ_vol with a shared green/red heatmap style.
+            function vovCorrCell(rho) {
+                if (rho === null || rho === undefined || isNaN(rho))
+                    return '<td style="color:var(--muted);">—</td>';
+                const intensity = Math.min(Math.abs(rho), 1.0);
+                const bg = rho >= 0
+                    ? `rgba(74, 222, 128, ${0.05 + intensity * 0.25})`
+                    : `rgba(248, 113, 113, ${0.05 + intensity * 0.25})`;
+                const fg = rho >= 0
+                    ? `rgb(${Math.round(74-intensity*10)},${Math.round(154+intensity*68)},${Math.round(107-intensity*20)})`
+                    : `rgb(${Math.round(184+intensity*64)},${Math.round(112-intensity*50)},${Math.round(112-intensity*40)})`;
+                return `<td style="background:${bg}; color:${fg}; font-weight:${intensity > 0.5 ? 600 : 400};">${rho.toFixed(2)}</td>`;
+            }
+
+            function vovCorrTable(rhoFn) {
+                let h = '<table class="data-table"><thead><tr><th></th>';
+                ccys.forEach(c => h += `<th>${c}</th>`);
+                h += '</tr></thead><tbody>';
+                ccys.forEach(c1 => {
+                    h += `<tr><td>${c1}</td>`;
+                    ccys.forEach(c2 => {
+                        h += (c1 === c2) ? '<td style="color:var(--text-secondary);">1.00</td>' : vovCorrCell(rhoFn(c1, c2));
+                    });
+                    h += '</tr>';
+                });
+                h += '</tbody></table>';
+                return h;
+            }
+
+            // Model 1 (BF only, rank-1): ρ = ν_g² / (ν_L · ν_R)
+            // ν_L, ν_R are the BF-implied (spot-orthogonal) total vol-of-vols.
+            const nuG2 = nuG * nuG;
+            html += '<div class="card"><div class="section-title">Implied Vol-of-Vol Correlation — BF only (' + tenor + ')</div>';
+            html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
+            html += `ρ_vol = ν_g² / (ν_L·ν_R), ν_g=${nuG.toFixed(2)} · rank-1: every correlation set by the shared global factor · pure-global currencies (η≈0) → ρ→1. This is the correlation of the spot-orthogonal vol shocks the butterfly sees.</div>`;
+            html += vovCorrTable((c1, c2) => {
+                const nL = ccyNu[c1], nR = ccyNu[c2];
+                return (nL > 0 && nR > 0) ? Math.max(-1, Math.min(1, nuG2 / (nL * nR))) : null;
+            });
+            html += '</div>';
+
+            // Model 2 (full / Part C): adds the leverage channel β_L·β_R·ρ_spot
+            //   ρ = (ν_g² + β_L·β_R·ρ_spot) / √[(ν_L²+β_L²)(ν_R²+β_R²)]
+            // β = spot-driven vol-of-vol (from RR); ρ_spot from the basket corr matrix.
+            html += '<div class="card"><div class="section-title">Implied Vol-of-Vol Correlation — Full / leverage-adjusted (' + tenor + ')</div>';
+            html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
+            html += `ρ_vol = (ν_g² + β_L·β_R·ρ_spot) / √[(ν_L²+β_L²)(ν_R²+β_R²)] · folds in the spot-correlation channel via the betas (total vol = BF-orthogonal ⊕ spot-driven). Differs from the BF-only matrix only where betas are large.</div>`;
+            html += vovCorrTable((c1, c2) => {
+                const nL = ccyNu[c1], nR = ccyNu[c2];
+                if (!(nL > 0 && nR > 0)) return null;
+                const bL = ccyBetas[c1] || 0, bR = ccyBetas[c2] || 0;
+                const rhoSpot = (corrMatrix && corrMatrix[c1] && corrMatrix[c1][c2] != null) ? corrMatrix[c1][c2] : 0;
+                const cov = nuG2 + bL * bR * rhoSpot;
+                const denom = Math.sqrt((nL*nL + bL*bL) * (nR*nR + bR*bR));
+                return denom > 0 ? Math.max(-1, Math.min(1, cov / denom)) : null;
+            });
+            html += '</div>';
+
             // BF pair results — with toggle
             nuPairs.sort((a,b) => Math.abs(b.residualBF||0) - Math.abs(a.residualBF||0));
             const maxResBF = Math.max(...nuPairs.map(p => Math.abs(p.residualBF||0)), 0.01);

@@ -332,9 +332,24 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 
 <p>An earlier version of this page argued for plain-w "weighted average" weights instead of w², because w² "systematically underpredicted every pair's BF". That was a symptom patch: with weights summing to one, the linear-w formula behaves like perfectly correlated currency vol-of-vols (ρ_vol ≈ 1) — it kept the level right for the wrong reason. The global factor is the honest version of the same fact: it makes the common component explicit and lets the idiosyncratic parts combine correctly in quadrature.</p>
 
-<h3>Identification — the BF analog of Σβ = 0</h3>
+<h3>How ν_g is actually backed out — the exact conditions</h3>
 
-<p>The split between ν_g and a uniform lift of all the η² is nearly flat in the data (the w² sums hover around 0.5 for most pairs) — the same disease as the unidentified level of the betas, which we pinned with Σβ = 0. The anchor here: scan ν_g, solve the η² ≥ 0 system at each grid point (non-negative least squares), and on the RMSE plateau take the <em>largest</em> ν_g. The common level lives in the global factor; the η's carry only relative structure.</p>
+<p>We never "solve" for ν_g directly — there isn't a unique algebraic answer, and understanding <em>why</em> is the whole game. Each pair gives one equation, ν²_AB = ν_g² + w_A²η_A² + w_B²η_B². But if you raise ν_g² by a small amount and lower every η² to compensate, the predictions barely move (because the w² in front of each η² sum to roughly ½ for most pairs). So a whole <em>family</em> of (ν_g, η) combinations fits almost equally well — the fit error is flat along a ridge. This is the same illness as the undetermined <em>level</em> of the betas, which we cured with Σβ = 0.</p>
+
+<p>So we impose four conditions and let them pin a single answer:</p>
+
+<table>
+    <tbody>
+        <tr><td><strong>1. One common factor</strong></td><td>every pair shares exactly one global vol shock ν_g (rank-1 common part)</td></tr>
+        <tr><td><strong>2. ν_g ≥ 0</strong></td><td>a volatility, so non-negative</td></tr>
+        <tr><td><strong>3. η_i² ≥ 0</strong></td><td>each idiosyncratic variance is non-negative — enforced by non-negative least squares (NNLS). This is what stops the compensation from running forever: push ν_g too high and some η² wants to go negative, gets floored at 0, and the fit finally breaks.</td></tr>
+        <tr><td><strong>4. Max-ν_g anchor</strong></td><td>among all (ν_g, η) within 2% of the best fit (the flat ridge), take the <em>largest</em> ν_g</td></tr>
+    </tbody>
+</table>
+
+<p>Mechanically: sweep ν_g from 0 upward; at each value, NNLS finds the best η² ≥ 0; record the fit error. The error stays flat across a plateau, then degrades once condition 3 starts binding. Condition 4 says walk to the far (high-ν_g) end of that plateau and stop.</p>
+
+<div class="insight"><strong>What condition 4 means economically:</strong> "attribute as much vol-of-vol as the data allows to the shared factor, and only call something idiosyncratic if the fit forces you to." It's a modeling choice, not a law — the honest analog of Σβ = 0. A different anchor (say, fixing the most-global currency's η to zero) gives almost the same answer. The number ν_g ≈ 1.79 is "the largest common vol-of-vol consistent with the butterfly cross-section," not a uniquely determined constant.</div>
 
 <div class="example">
     <span class="label">Results (1M, 8 currencies, 16 pairs)</span>
@@ -372,7 +387,45 @@ td:first-child { text-align: left; color: var(--cyan); font-weight: 500; }
 <div class="insight"><strong>Division of labour:</strong> RR prices the spot-spanned vol risk (β); BF prices the spot-orthogonal vol risk (ν_idio). The "long RR gamma" carry on a long fly is real — but it is fully paid for in fair value. Practical upshot: BF-implied ν_log is clean of skew at realistic β, and the decomposition in Section 9 operates on genuinely orthogonal quantities.</div>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
-<h2>11. Summary</h2>
+<h2>11. Spot Correlation vs Vol Correlation — Three Different Things</h2>
+
+<p>The factor model quietly hands us something new: an <em>implied correlation between currencies' vols</em>, ρ_vol(L,R) = ν_g² / (ν_L·ν_R). Two currencies' vols are correlated only through the shock they share — the global factor — so the formula is just "how much of each one's vol-of-vol is the common part." It's an <em>output</em> of the butterfly fit, not an input. But it's easy to confuse with spot correlation, so let's be precise.</p>
+
+<h3>First: what "orthogonal" means</h3>
+
+<p>Two shocks are <em>orthogonal</em> when they're uncorrelated — when one fires it tells you nothing about the other. The word is geometric: think of shocks as arrows. Same direction → they reinforce; opposite → they cancel; <em>perpendicular</em> → independent, and their combined size obeys Pythagoras, a² + b² = c². That is exactly why our variances add with no cross term:</p>
+
+<div class="formula">
+    ν² = ν_g² + η²&nbsp;&nbsp;&nbsp;(no 2·cov term — because global ⊥ idiosyncratic)
+</div>
+
+<p>If the global factor and a currency's own vol shock were <em>not</em> orthogonal, that clean sum would gain a term + 2·ρ·ν_g·η. We assumed it away. (Concretely: a BoJ surprise to JPY vol is assumed equally likely whether or not global vol is spiking. For JPY that assumption is the most suspect one in the whole model.)</p>
+
+<h3>Three correlations that get confused</h3>
+
+<table>
+    <thead><tr><th>Correlation of…</th><th>What it measures</th><th>Where it comes from</th></tr></thead>
+    <tbody>
+        <tr><td>spot returns (ρ)</td><td>do the two pairs move up/down together (direction)</td><td>the basket / cross triangle</td></tr>
+        <tr><td>squared returns (= ρ²)</td><td>do the big-move days line up (size, ignoring direction)</td><td>a math identity about returns</td></tr>
+        <tr><td>vol-of-vol (ν_g²/ν_Lν_R)</td><td>do the two vol <em>levels</em> drift up/down together over weeks</td><td>fit from butterfly prices</td></tr>
+    </tbody>
+</table>
+
+<p>Under joint normality, squaring spot correlation gives the correlation of squared returns: Corr(r_L², r_R²) = ρ². That is true — but it is the <em>middle</em> row: whether two pairs have their big days on the same days. It is <em>not</em> the bottom row. The vol-of-vol matrix measures the slow drift of the vol level between calm and nervous regimes, which is dominated by the common risk factor and is fit independently from option prices. So <strong>the butterfly-implied vol correlation does not equal ρ², and does not come from spot correlation at all.</strong> They would coincide only in a make-believe world where vol is nothing but trailing realized variance with no regime of its own.</p>
+
+<div class="insight"><strong>The one real bridge — the betas.</strong> Spot correlation <em>does</em> leak into vol co-movement, but through one specific channel: the leverage term β_L·β_R·ρ_spot (first power of ρ, scaled by both betas). That is the difference between the two correlation matrices in the tool — "BF only" (ν_g²/ν_Lν_R) versus "leverage-adjusted" (adds β_L·β_R·ρ_spot up top). The basket gives spot correlation; the butterflies give vol correlation; the betas are the bridge.</div>
+
+<h3>Why one factor isn't enough — blocs</h3>
+
+<p>With a single global factor, a currency's only way to correlate with others is its loading on that one shared shock. So a "mostly global" currency (η ≈ 0) is forced to look ρ ≈ 1 to <em>everyone</em> who is also mostly global — you can see it in the BF-only matrix, where EUR, GBP and CNH are 1.00 to each other and equally high to the rest. The model literally cannot express "EUR vol is especially tied to CHF, more than to JPY."</p>
+
+<p>But that EUR–CHF bloc is economically real (ECB/SNB, EURCHF management) and has nothing to do with JPY. To represent it you add a <em>second</em> factor — a regional "European vol" shock that EUR and CHF both load on but JPY doesn't. One factor = a single global weather system everyone shares; two factors = global weather plus regional weather, so currencies in the same region co-move more than either does with an outsider. Standard factor-model logic (one market factor + sector factors).</p>
+
+<div class="insight"><strong>Next frontier — vol of correlation.</strong> We now have σ (ATM), β (RR), ν (BF) and ρ_spot (basket). The last missing piece is the <em>volatility of implied correlation</em> itself. It falls right out of this toolkit: a cross's correlation is a fixed function of three vols (ρ = (σ_X²+σ_Y²−σ_C²)/(2σ_Xσ_Y)), so its movement is driven by those three vols' vol-of-vols and how they co-move — i.e. ν and the very vol-of-vol correlation matrix above. The leftover stochastic-correlation signal is exactly the AUDNZD-type residual in Section 9.</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>12. Summary</h2>
 
 <p><span class="step-num">1</span> The BF prices vol-of-vol through the volga P&L mechanism</p>
 <p><span class="step-num">2</span> For 25d options: <em>ν_log = √(BF / (0.075 × ATM × T))</em></p>

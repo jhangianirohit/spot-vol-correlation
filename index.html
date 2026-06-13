@@ -1381,164 +1381,6 @@ function computeBasket() {
     html += viewResid + viewCcy;
     html += '</div>';
 
-    // ═══════════ CROSS-SECTIONAL FAIR VALUES ═══════════
-    // For each pair (A,B), compute a fair vol that is OUT-OF-SAMPLE
-    // (does not use pair AB's own vol). Signal = Fair - Implied.
-    {
-        const Nfv = ccys.length;
-        const fvScale = (Nfv - 1) / Nfv;
-        const fairResults = [];
-
-        for (let i = 0; i < ccys.length; i++) {
-            for (let j = i + 1; j < ccys.length; j++) {
-                const c1 = ccys[i], c2 = ccys[j];
-                // Find pair in data
-                const matchPair = Object.keys(pairs).find(p => {
-                    const [l,r] = [p.slice(0,3), p.slice(3,6)];
-                    return (l === c1 && r === c2) || (l === c2 && r === c1);
-                });
-                if (!matchPair) continue;
-                const impliedVol = pairs[matchPair].vol / 100; // decimal
-
-                // Step 1: LOO basket vols — exclude pair AB
-                let sum1 = 0, cnt1 = 0, sum2 = 0, cnt2 = 0;
-                for (let k = 0; k < ccys.length; k++) {
-                    if (k === i || k === j) continue;
-                    const ck = ccys[k];
-                    // Find pair c1-ck
-                    const p1 = Object.keys(pairs).find(p => {
-                        const [l,r] = [p.slice(0,3), p.slice(3,6)];
-                        return (l === c1 && r === ck) || (l === ck && r === c1);
-                    });
-                    if (p1) { const v = pairs[p1].vol/100; sum1 += v*v; cnt1++; }
-                    // Find pair c2-ck
-                    const p2 = Object.keys(pairs).find(p => {
-                        const [l,r] = [p.slice(0,3), p.slice(3,6)];
-                        return (l === c2 && r === ck) || (l === ck && r === c2);
-                    });
-                    if (p2) { const v = pairs[p2].vol/100; sum2 += v*v; cnt2++; }
-                }
-                if (cnt1 === 0 || cnt2 === 0) continue;
-                const looBV1 = Math.sqrt(sum1 / cnt1);
-                const looBV2 = Math.sqrt(sum2 / cnt2);
-
-                // Step 2: Predicted correlation via rank-1 factor model
-                // ρ_pred(A,B) = mean over C≠A,B of ρ(A,C) × ρ(B,C)
-                let rhoSum = 0, rhoCnt = 0;
-                for (let k = 0; k < ccys.length; k++) {
-                    if (k === i || k === j) continue;
-                    const ck = ccys[k];
-                    const rAC = corrMatrix[c1] && corrMatrix[c1][ck];
-                    const rBC = corrMatrix[c2] && corrMatrix[c2][ck];
-                    if (rAC != null && rBC != null) {
-                        rhoSum += rAC * rBC;
-                        rhoCnt++;
-                    }
-                }
-                if (rhoCnt === 0) continue;
-                const rhoPred = Math.max(-1, Math.min(1, rhoSum / rhoCnt));
-
-                // Step 3: Fair vol = sqrt(σ²_A + σ²_B - 2ρσ_Aσ_B) × (N-1)/N
-                const fairVar = looBV1*looBV1 + looBV2*looBV2 - 2*rhoPred*looBV1*looBV2;
-                if (fairVar < 0) continue;
-                const fairVol = Math.sqrt(fairVar) * fvScale;
-
-                // Step 4: Signal
-                const signal = (fairVol - impliedVol) * 100; // in vol %
-
-                fairResults.push({
-                    pair: matchPair, c1, c2,
-                    impliedVol: impliedVol * 100,
-                    fairVol: fairVol * 100,
-                    signal,
-                    rhoPred,
-                });
-            }
-        }
-
-        fairResults.sort((a,b) => Math.abs(b.signal) - Math.abs(a.signal));
-
-        if (fairResults.length > 0) {
-            const maxSig = Math.max(...fairResults.map(r => Math.abs(r.signal)), 0.3);
-
-            function fvDirStyle(sig) {
-                const dir = sig > 0.05 ? 'CHEAP' : sig < -0.05 ? 'RICH' : 'FLAT';
-                const s = dir === 'CHEAP'
-                    ? 'background:rgba(74,222,128,0.15); color:#4ade80; padding:2px 6px; border-radius:2px; font-size:9px;'
-                    : dir === 'RICH'
-                    ? 'background:rgba(248,113,113,0.15); color:#f87171; padding:2px 6px; border-radius:2px; font-size:9px;'
-                    : 'background:rgba(107,114,128,0.15); color:#6b7280; padding:2px 6px; border-radius:2px; font-size:9px;';
-                return { dir, style: s };
-            }
-
-            function fvRow(r) {
-                const { dir, style: ds } = fvDirStyle(r.signal);
-                let row = '<tr>';
-                row += `<td>${r.pair}</td>`;
-                row += `<td>${r.impliedVol.toFixed(2)}</td>`;
-                row += `<td>${r.fairVol.toFixed(2)}</td>`;
-                row += td(fmtSigned(r.signal), true, maxSig);
-                row += `<td>${r.rhoPred.toFixed(2)}</td>`;
-                row += `<td><span style="${ds}">${dir}</span></td>`;
-                row += '</tr>';
-                return row;
-            }
-
-            function fvTableHeader() {
-                let h = '<table class="data-table"><thead><tr>';
-                ['Pair','Implied Vol','Fair Vol','Signal','ρ Pred','Direction'].forEach(c => h += `<th>${c}</th>`);
-                h += '</tr></thead><tbody>';
-                return h;
-            }
-
-            // View 1: sorted by |signal|
-            let fvViewResid = '<div id="fv-view-resid">';
-            fvViewResid += fvTableHeader();
-            fairResults.forEach(r => fvViewResid += fvRow(r));
-            fvViewResid += '</tbody></table></div>';
-
-            // View 2: grouped by currency
-            const fvCcyPairs = {};
-            ccys.forEach(c => fvCcyPairs[c] = []);
-            fairResults.forEach(r => {
-                fvCcyPairs[r.c1].push(r);
-                fvCcyPairs[r.c2].push(r);
-            });
-
-            let fvViewCcy = '<div id="fv-view-ccy" style="display:none;">';
-            const fvCcyOrder = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
-            fvCcyOrder.forEach(ccy => {
-                const cp = fvCcyPairs[ccy];
-                if (!cp || cp.length === 0) return;
-                cp.sort((a,b) => Math.abs(b.signal) - Math.abs(a.signal));
-                const b = ccyBetas[ccy];
-                const bv = basketVols[ccy] * 100;
-                fvViewCcy += `<div style="margin-top:16px; margin-bottom:4px;">`;
-                fvViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--cyan); font-weight:600;">${ccy}</span>`;
-                fvViewCcy += `<span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-secondary); margin-left:12px;">`;
-                fvViewCcy += `Basket Vol: ${bv.toFixed(2)}% · β: ${fmtSigned(b)}`;
-                fvViewCcy += `</span></div>`;
-                fvViewCcy += fvTableHeader();
-                cp.forEach(r => fvViewCcy += fvRow(r));
-                fvViewCcy += '</tbody></table>';
-            });
-            fvViewCcy += '</div>';
-
-            html += '<div class="card">';
-            html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
-            html += `<div class="section-title" style="margin:0; border:none; padding:0;">Cross-Sectional Fair Values (${tenor})</div>`;
-            html += '<div class="btn-row" style="margin:0;">';
-            html += '<button class="btn" id="btn-fv-resid" onclick="toggleFVView(\'resid\')" style="font-size:9px; padding:4px 10px; background:var(--cyan); color:#000;">By Signal</button>';
-            html += '<button class="btn" id="btn-fv-ccy" onclick="toggleFVView(\'ccy\')" style="font-size:9px; padding:4px 10px;">By Currency</button>';
-            html += '</div></div>';
-            html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Fair vol out-of-sample (excl own pair). Positive signal = CHEAP, Negative = RICH.</div>';
-            html += fvViewResid + fvViewCcy;
-            html += '</div>';
-
-            lastBasketResults.fairResults = fairResults;
-        }
-    }
-
     // ═══════════ ν_log BASKET SOLVE — GLOBAL + IDIOSYNCRATIC ═══════════
     // Each currency's log-vol shock: d ln σ_i = ν_g·dW_g + η_i·dW_i
     // (one GLOBAL vol Brownian shared by all currencies + idio shocks).
@@ -1676,12 +1518,19 @@ function computeBasket() {
             const maxObsBF = Math.max(...nuPairs.map(p => Math.abs(p.bf||0)), 0.1);
             const maxNuDisp = Math.max(...nuPairs.map(p => Math.max(Math.abs(p.obsNu||0), Math.abs(p.predNu||0))), 1);
 
+            const maxDailyVoV = Math.max(...nuPairs.map(p =>
+                Math.max(dailyVolStdev(p.vol, p.obsNu), dailyVolStdev(p.vol, p.predNu))), 0.1);
+
             function bfRow(p) {
+                const obsDaily = dailyVolStdev(p.vol, p.obsNu);
+                const predDaily = dailyVolStdev(p.vol, p.predNu);
                 let r = '<tr>';
                 r += `<td>${p.pair}</td>`;
                 r += `<td>${p.vol.toFixed(2)}</td>`;
                 r += td(p.obsNu.toFixed(2), true, maxNuDisp);
                 r += td(p.predNu.toFixed(2), true, maxNuDisp);
+                r += td(obsDaily.toFixed(2) + 'v', true, maxDailyVoV);
+                r += td(predDaily.toFixed(2) + 'v', true, maxDailyVoV);
                 r += td(p.bf.toFixed(2), true, maxObsBF);
                 r += td(p.predBF.toFixed(2), true, maxObsBF);
                 r += td(fmtSigned(p.residualBF), true, maxResBF);
@@ -1691,7 +1540,7 @@ function computeBasket() {
 
             function bfTableHeader() {
                 let h = '<table class="data-table"><thead><tr>';
-                ['Pair','Vol%','Obs ν','Pred ν','Obs BF%','Pred BF%','Residual'].forEach(c => h += `<th>${c}</th>`);
+                ['Pair','Vol%','Obs ν','Pred ν','Obs Daily σ','Pred Daily σ','Obs BF%','Pred BF%','Residual'].forEach(c => h += `<th>${c}</th>`);
                 h += '</tr></thead><tbody>';
                 return h;
             }
@@ -1796,25 +1645,6 @@ function toggleVAView(view) {
         allEl.style.display = 'block';
         ccyEl.style.display = 'none';
         btnAll.style.background = 'var(--cyan)'; btnAll.style.color = '#000';
-        btnCcy.style.background = 'transparent'; btnCcy.style.color = 'var(--cyan)';
-    }
-}
-
-function toggleFVView(view) {
-    const residEl = document.getElementById('fv-view-resid');
-    const ccyEl = document.getElementById('fv-view-ccy');
-    const btnResid = document.getElementById('btn-fv-resid');
-    const btnCcy = document.getElementById('btn-fv-ccy');
-    if (!residEl || !ccyEl) return;
-    if (view === 'ccy') {
-        residEl.style.display = 'none';
-        ccyEl.style.display = 'block';
-        btnResid.style.background = 'transparent'; btnResid.style.color = 'var(--cyan)';
-        btnCcy.style.background = 'var(--cyan)'; btnCcy.style.color = '#000';
-    } else {
-        residEl.style.display = 'block';
-        ccyEl.style.display = 'none';
-        btnResid.style.background = 'var(--cyan)'; btnResid.style.color = '#000';
         btnCcy.style.background = 'transparent'; btnCcy.style.color = 'var(--cyan)';
     }
 }
@@ -1930,28 +1760,6 @@ function copyBasketEmail() {
                     h += `<td style="padding: 4px 6px; border: 1px solid #e5e7eb; background: ${bg}; color: ${col}; text-align: center;">${rho.toFixed(2)}</td>`;
                 }
             });
-            h += `</tr>`;
-        });
-        h += `</table>`;
-    }
-
-    // Fair values in email
-    if (lastBasketResults.fairResults && lastBasketResults.fairResults.length > 0) {
-        h += `<h3 style="font-size: 12px; margin-top: 16px;">CROSS-SECTIONAL FAIR VALUES</h3>`;
-        h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
-        h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
-        ['Pair','Implied','Fair','Signal','Direction'].forEach(hd => h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`);
-        h += `</tr>`;
-        lastBasketResults.fairResults.forEach(r => {
-            const dir = r.signal > 0.05 ? 'CHEAP' : r.signal < -0.05 ? 'RICH' : 'FLAT';
-            const sc = emailColor(r.signal, 0.5);
-            const dc = dir === 'CHEAP' ? '#166534' : dir === 'RICH' ? '#991b1b' : '#6b7280';
-            h += `<tr>`;
-            h += `<td style="padding: 4px 8px; text-align: left; border: 1px solid #e5e7eb;">${r.pair}</td>`;
-            h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.impliedVol.toFixed(2)}</td>`;
-            h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb;">${r.fairVol.toFixed(2)}</td>`;
-            h += `<td style="padding: 4px 8px; text-align: right; border: 1px solid #e5e7eb; color:${sc.color}; background:${sc.bg};">${fmtSigned(r.signal)}</td>`;
-            h += `<td style="padding: 4px 8px; text-align: center; border: 1px solid #e5e7eb; color:${dc}; font-weight:600;">${dir}</td>`;
             h += `</tr>`;
         });
         h += `</table>`;

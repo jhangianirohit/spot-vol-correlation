@@ -1568,6 +1568,95 @@ function computeBasket() {
             });
             html += '</div>';
 
+            // ── Vol of Implied Correlation (model + market) ──
+            // A cross C=XY has ρ = corr(V_X, V_Y) pinned by three vols:
+            //   ρ = (σ_X² + σ_Y² − σ_C²) / (2 σ_X σ_Y)
+            // dρ = g_X dσ_X + g_Y dσ_Y + g_C dσ_C, so
+            //   Var(dρ) = Σ_ij g_i g_j σ_i σ_j ν_i ν_j ρ_vol(i,j)
+            // model → fitted ν; market → each pair's own observed ν.
+            {
+                const nuG2vc = nuG * nuG;
+                const piByPair = {};
+                pairList.forEach(p => { piByPair[p.pair] = p; });
+                const modelNu = p => {
+                    const eL = ccyEta[p.lhs] || 0, eR = ccyEta[p.rhs] || 0;
+                    return Math.sqrt(nuG2vc + p.wL*p.wL*eL*eL + p.wR*p.wR*eR*eR);
+                };
+                const findLeg = ccy => pairList.find(p =>
+                    (p.lhs === ccy && p.rhs === 'USD') || (p.lhs === 'USD' && p.rhs === ccy));
+                const covLogVol = (pa, pb) => {
+                    let cov = nuG2vc;  // shared global factor
+                    const wa = {[pa.lhs]: pa.wL, [pa.rhs]: pa.wR};
+                    const wb = {[pb.lhs]: pb.wL, [pb.rhs]: pb.wR};
+                    Object.keys(wa).forEach(s => {
+                        if (wb[s] !== undefined) cov += wa[s] * wb[s] * (ccyEta[s] || 0)**2;
+                    });
+                    return cov;
+                };
+
+                const vovcRows = [];
+                pairList.forEach(p => {
+                    if (p.lhs === 'USD' || p.rhs === 'USD') return;       // crosses only
+                    const legX = findLeg(p.lhs), legY = findLeg(p.rhs);
+                    if (!legX || !legY) return;
+                    if (p.obsNu == null || legX.obsNu == null || legY.obsNu == null) return;
+
+                    const sX = legX.vol, sY = legY.vol, sC = p.vol;
+                    let rho = (sX*sX + sY*sY - sC*sC) / (2*sX*sY);
+                    rho = Math.max(-0.999, Math.min(0.999, rho));
+
+                    const grad = [
+                        (sX*sX - sY*sY + sC*sC) / (2*sX*sX*sY),  // ∂ρ/∂σ_X
+                        (sY*sY - sX*sX + sC*sC) / (2*sY*sY*sX),  // ∂ρ/∂σ_Y
+                        -sC / (sX*sY),                            // ∂ρ/∂σ_C
+                    ];
+                    const order = [legX, legY, p];
+                    const sig = [sX, sY, sC];
+                    const mnu = order.map(modelNu);
+                    const onu = [legX.obsNu, legY.obsNu, p.obsNu];
+                    const rhoVol = (i, j) => i === j ? 1
+                        : covLogVol(order[i], order[j]) / (mnu[i] * mnu[j]);
+                    const varDrho = nuArr => {
+                        let t = 0;
+                        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+                            t += grad[i]*grad[j]*sig[i]*sig[j]*nuArr[i]*nuArr[j]*rhoVol(i, j);
+                        return t;
+                    };
+                    const vm = varDrho(mnu), vk = varDrho(onu);
+                    const vovcM = vm > 0 ? Math.sqrt(vm) : 0;
+                    const vovcK = vk > 0 ? Math.sqrt(vk) : -Math.sqrt(-vk);
+                    vovcRows.push({
+                        cross: p.pair, legs: legX.pair + '/' + legY.pair, rho,
+                        vovcM, vovcK, dailyK: vovcK / Math.sqrt(252),
+                        signal: vovcK - vovcM,
+                    });
+                });
+
+                if (vovcRows.length) {
+                    vovcRows.sort((a, b) => Math.abs(b.signal) - Math.abs(a.signal));
+                    const maxSig = Math.max(...vovcRows.map(r => Math.abs(r.signal)), 0.01);
+                    const maxV = Math.max(...vovcRows.map(r => Math.max(r.vovcM, Math.abs(r.vovcK))), 0.1);
+                    html += '<div class="card"><div class="section-title">Vol of Implied Correlation (' + tenor + ')</div>';
+                    html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
+                    html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = market − model (cross fly rich +, cheap −)</div>`;
+                    html += '<table class="data-table"><thead><tr>';
+                    ['Cross','Legs','ρ impl','VoVC model','VoVC mkt','Daily mkt','Signal'].forEach(h => html += `<th>${h}</th>`);
+                    html += '</tr></thead><tbody>';
+                    vovcRows.forEach(r => {
+                        html += '<tr>';
+                        html += `<td>${r.cross}</td>`;
+                        html += `<td style="color:var(--text-secondary); font-size:10px;">${r.legs}</td>`;
+                        html += `<td>${r.rho.toFixed(3)}</td>`;
+                        html += td(r.vovcM.toFixed(3), true, maxV);
+                        html += td(r.vovcK.toFixed(3), true, maxV);
+                        html += `<td>${r.dailyK.toFixed(4)}</td>`;
+                        html += td(fmtSigned(r.signal, 3), true, maxSig);
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table></div>';
+                }
+            }
+
             // BF pair results — with toggle
             nuPairs.sort((a,b) => Math.abs(b.residualBF||0) - Math.abs(a.residualBF||0));
             const maxResBF = Math.max(...nuPairs.map(p => Math.abs(p.residualBF||0)), 0.01);

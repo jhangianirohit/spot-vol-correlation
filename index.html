@@ -833,7 +833,7 @@ function computeCross() {
             // Predicted RR
             const predRR = fairRR(betaCross, dc.vol, tenor);
             const mktRR = dc.rr;
-            const residual = mktRR != null && predRR != null ? mktRR - predRR : null;
+            const residual = mktRR != null && predRR != null ? predRR - mktRR : null;
 
             crossResults.push({
                 cross, tenor, pair1, pair2, a, b, rhoVol, beta1, beta2,
@@ -868,8 +868,8 @@ function computeCross() {
         });
         if (maxRes < 0.01) maxRes = 0.5;
 
-        html += '<div class="card"><div class="section-title">Residual Heatmap (Market − Predicted RR%)</div>';
-        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Positive (green) = cross RR cheap · Negative (red) = rich</div>';
+        html += '<div class="card"><div class="section-title">Residual Heatmap (Predicted − Market RR%)</div>';
+        html += '<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">Positive (green) = cross RR cheap, buy to converge · Negative (red) = rich, sell</div>';
         html += '<table class="data-table"><thead><tr><th>Cross</th>';
         crossTenors.forEach(t => html += `<th>${t}</th>`);
         html += '</tr></thead><tbody>';
@@ -928,6 +928,7 @@ function copyEmailReport() {
 
     // Cross results
     h += `<h3 style="font-size: 12px; margin-top: 16px;">CROSS RR: PREDICTED vs MARKET</h3>`;
+    h += `<p style="color: #9ca3af; font-size: 10px; margin: 2px 0 6px;">Residual = Predicted − Market · positive (green) = market cheap, buy to converge</p>`;
     h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
     h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
     ['Cross','Tenor','ρ','β cross','Pred RR%','Mkt RR%','Residual'].forEach(hd => {
@@ -1135,7 +1136,7 @@ function computeBasket() {
     pairList.forEach(p => {
         p.predBeta = p.wL * ccyBetas[p.lhs] - p.wR * ccyBetas[p.rhs];
         p.predRR = fairRR(p.predBeta, p.vol, tenor);
-        p.residual = p.rr != null && p.predRR != null ? p.rr - p.predRR : null;
+        p.residual = p.rr != null && p.predRR != null ? p.predRR - p.rr : null;
     });
 
     // Sort pairs by absolute residual descending
@@ -1474,7 +1475,7 @@ function computeBasket() {
                 const predNu2 = nuG*nuG + p.wL*p.wL*eL*eL + p.wR*p.wR*eR*eR;
                 p.predNu = Math.sqrt(predNu2);
                 p.predBF = fairBF(p.predNu, p.vol, T_bf);
-                p.residualBF = p.bf - p.predBF;
+                p.residualBF = p.predBF - p.bf;
             });
 
             // Currency ν table
@@ -1628,7 +1629,7 @@ function computeBasket() {
                     vovcRows.push({
                         cross: p.pair, legs: legX.pair + '/' + legY.pair, rho,
                         vovcM, vovcK, dailyK: vovcK / Math.sqrt(252),
-                        signal: vovcK - vovcM,
+                        signal: vovcM - vovcK,
                     });
                 });
 
@@ -1638,7 +1639,7 @@ function computeBasket() {
                     const maxV = Math.max(...vovcRows.map(r => Math.max(r.vovcM, Math.abs(r.vovcK))), 0.1);
                     html += '<div class="card"><div class="section-title">Vol of Implied Correlation (' + tenor + ')</div>';
                     html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
-                    html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = market − model (cross fly rich +, cheap −)</div>`;
+                    html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = model − market (positive = cross fly cheap, buy to converge)</div>`;
                     html += '<table class="data-table"><thead><tr>';
                     ['Cross','Legs','ρ impl','VoVC model','VoVC mkt','Daily mkt','Signal'].forEach(h => html += `<th>${h}</th>`);
                     html += '</tr></thead><tbody>';
@@ -1755,10 +1756,11 @@ function computeBasket() {
                     const rrRes = p.residual;
                     const bfRes = bfResMap[p.pair] || 0;
                     let quad = '';
-                    if (rrRes < -0.05 && bfRes < -0.01) quad = 'Skew rich / VoV rich';
-                    else if (rrRes < -0.05 && bfRes > 0.01) quad = 'Skew rich / VoV cheap';
+                    // residuals are model − market: positive = cheap (buy)
+                    if (rrRes > 0.05 && bfRes > 0.01) quad = 'Skew cheap / VoV cheap';
                     else if (rrRes > 0.05 && bfRes < -0.01) quad = 'Skew cheap / VoV rich';
-                    else if (rrRes > 0.05 && bfRes > 0.01) quad = 'Skew cheap / VoV cheap';
+                    else if (rrRes < -0.05 && bfRes > 0.01) quad = 'Skew rich / VoV cheap';
+                    else if (rrRes < -0.05 && bfRes < -0.01) quad = 'Skew rich / VoV rich';
                     else quad = 'Neutral';
 
                     html += '<tr>';
@@ -1871,6 +1873,7 @@ function copyBasketEmail() {
 
     // Pair results
     h += `<h3 style="font-size: 12px; margin-top: 16px;">PAIR DECOMPOSITION</h3>`;
+    h += `<p style="color: #9ca3af; font-size: 10px; margin: 2px 0 6px;">Residual = Pred − Obs · positive (green) = market cheap, buy to converge</p>`;
     h += `<table style="border-collapse: collapse; width: 100%; font-family: Consolas, monospace; font-size: 11px;">`;
     h += `<tr style="background: #0d1117; color: #e5e5e5;">`;
     ['Pair','Vol%','Obs RR%','Pred RR%','Residual'].forEach(hd => h += `<th style="padding: 6px 8px; text-align: right; border: 1px solid #d1d5db;">${hd}</th>`);

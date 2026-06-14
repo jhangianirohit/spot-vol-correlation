@@ -91,39 +91,65 @@ def skew_markup(rr_decimal):
     return (c_skew - c_flat) - (p_skew - p_flat)
 
 
-def run_cell(beta, n_paths, seed=42):
+def skew_markup_T(rr_decimal, T_, Kc, Kp):
+    """skew_markup for an arbitrary tenor/strikes (used in the tenor sweep)."""
+    sc, sp = sigma_atm + rr_decimal / 2, sigma_atm - rr_decimal / 2
+    return ((bs_price_vec(S0, Kc, T_, sc, True) - bs_price_vec(S0, Kc, T_, sigma_atm, True))
+            - (bs_price_vec(S0, Kp, T_, sp, False) - bs_price_vec(S0, Kp, T_, sigma_atm, False)))
+
+
+def run_cell(beta, n_paths, seed=42, T_=None, Kc=None, Kp=None,
+             n_grid=None, hedge_every=1):
     """Delta-hedged RR (+call, -put) P&L under dσ/σ = β·dW_spot.
 
     Both legs repriced at a single evolving vol (no static smile carried);
     the skew markup is the inception edge, and realized vanna P&L is what
-    we measure against it.  Mean hedged P&L is hedge-invariant (E[dS]=0)."""
+    we measure against it.
+
+    Two knobs are deliberately separated:
+      n_grid      — number of time steps the SPOT+VOL paths are simulated
+                    on (numerical resolution of the continuous dynamics).
+      hedge_every — rebalance the delta hedge every k grid steps; the hedge
+                    delta is held constant in between.
+
+    The mean P&L is hedge-invariant: the hedge term is −delta·dS with delta
+    predictable and E[dS]=0, so E[hedge P&L]=0 at ANY hedge_every. Changing
+    hedge_every moves only the variance (SE). Changing n_grid moves the mean,
+    via Euler discretization bias, and the mean converges as n_grid grows."""
+    T_ = T if T_ is None else T_
+    Kc = K_call if Kc is None else Kc
+    Kp = K_put if Kp is None else Kp
+    n_grid = N_days if n_grid is None else n_grid
+    h = T_ / n_grid
+
     rng = np.random.default_rng(seed)
     S = np.full(n_paths, S0)
     vol = np.full(n_paths, sigma_atm)
     pnl = np.zeros(n_paths)
+    delta_rr = None
 
-    for day in range(N_days):
-        tau = T - day * dt
+    for i in range(n_grid):
+        tau = T_ - i * h
         if tau < 1e-8:
             break
-        tau_next = max(tau - dt, 1e-8)
+        tau_next = max(tau - h, 1e-8)
 
-        dc = bs_delta_vec(S, K_call, tau, vol, True)
-        dp = bs_delta_vec(S, K_put, tau, vol, False)
-        delta_rr = dc - dp  # +call, -put
+        if i % hedge_every == 0:  # rebalance, else carry prior delta
+            delta_rr = (bs_delta_vec(S, Kc, tau, vol, True)
+                        - bs_delta_vec(S, Kp, tau, vol, False))
 
         Z1 = rng.standard_normal(n_paths)
-        dS = S * (np.exp(-0.5 * vol**2 * dt + vol * np.sqrt(dt) * Z1) - 1)
+        dS = S * (np.exp(-0.5 * vol**2 * h + vol * np.sqrt(h) * Z1) - 1)
 
         # vol moves WITH spot: dσ/σ = β·dW_spot  (β = vol pts per 1% spot)
-        vol_new = vol * np.exp(-0.5 * beta**2 * dt + beta * np.sqrt(dt) * Z1)
+        vol_new = vol * np.exp(-0.5 * beta**2 * h + beta * np.sqrt(h) * Z1)
         vol_new = np.maximum(vol_new, 0.005)
         S_new = S + dS
 
-        old_val = (bs_price_vec(S, K_call, tau, vol, True)
-                   - bs_price_vec(S, K_put, tau, vol, False))
-        new_val = (bs_price_vec(S_new, K_call, tau_next, vol_new, True)
-                   - bs_price_vec(S_new, K_put, tau_next, vol_new, False))
+        old_val = (bs_price_vec(S, Kc, tau, vol, True)
+                   - bs_price_vec(S, Kp, tau, vol, False))
+        new_val = (bs_price_vec(S_new, Kc, tau_next, vol_new, True)
+                   - bs_price_vec(S_new, Kp, tau_next, vol_new, False))
 
         pnl += (new_val - old_val) - delta_rr * dS
         S, vol = S_new, vol_new
@@ -157,63 +183,52 @@ if __name__ == '__main__':
     print('  formula (any excess in market β is then genuine risk premium).')
     print('  Systematic departure ⇒ the formula itself biases implied β.')
 
-    # ─── Stress / robustness ────────────────────────────────────────
-    # Re-run the β = -2.0 case while perturbing one assumption at a time.
-    # A trustworthy translation keeps recovery ≈ constant; a recovery that
-    # drifts with the perturbation flags where the formula leaks.
+    # ─── Stress A: hedge frequency only ─────────────────────────────
+    # Fix a fine path grid (4x/day) and change ONLY how often the delta is
+    # rebalanced. The MEAN recovery is hedge-invariant; only the SE (your
+    # real-world tracking error) should move.
+    beta_s = -2.0
+    rr_s = compute_fair_rr(S0, LABEL, sigma_atm, beta_s)
+    mk_s = skew_markup(rr_s)
+    FINE = 120  # ~4x/day over a 30d month
     print()
-    print('  STRESS: recovery for β=-2.0 under perturbed assumptions')
-    print('  ' + '─' * 64)
+    print('  STRESS A — vary delta-hedge frequency on a FIXED fine grid (4x/day):')
+    print(f'    {"rebalance":<24s}{"recovery":>9s}{"SE":>9s}')
+    for he, lab in [(1, 'every step (4x/day)'), (4, 'daily'),
+                    (20, 'weekly'), (FINE, 'never')]:
+        mp, se = run_cell(beta_s, 400_000, n_grid=FINE, hedge_every=he)
+        print(f'    {lab:<24s}{mp/mk_s:9.4f}{se/abs(mk_s):9.4f}')
+    print('    → mean flat ⇒ hedge frequency sets VARIANCE, not the edge.')
 
-    import spotvol.implied_beta as ib_mod
-    globals_backup = (T, dt, K_call, K_put, N_days)
-
-    def reset():
-        globals()['T'], globals()['dt'], globals()['K_call'], \
-            globals()['K_put'], globals()['N_days'] = globals_backup
-
-    def one(beta, label, n_paths=400_000):
-        rr = compute_fair_rr(S0, LABEL, sigma_atm, beta) if globals()['T'] == globals_backup[0] \
-            else ib_mod.compute_fair_rr(S0, label_for_T, sigma_atm, beta)
-        mk = skew_markup(rr)
-        mp, se = run_cell(beta, n_paths)
-        print(f'    {label:<34s} recovery={mp/mk:6.4f}  (SE {se/abs(mk):.4f})')
-
-    # baseline
-    one(-2.0, 'baseline (1M, daily hedge)')
-
-    # hedge frequency: 6x finer
-    N_days, dt = 180, T / 180
-    one(-2.0, 'hedge 6x/day (discretization)')
-    reset()
-
-    # hedge frequency: weekly
-    N_days, dt = 4, T / 4
-    one(-2.0, 'hedge weekly (coarse)')
-    reset()
-
-    # different tenor: 1W and 3M (rebuild strikes + horizon)
-    for lbl in ['1W', '3M']:
-        label_for_T = lbl
-        T = tenor_to_T(lbl)
-        TENOR_N = {'1W': 7, '3M': 91}[lbl]
-        N_days, dt = TENOR_N, T / TENOR_N
-        K_call = find_strike(S0, T, sigma_atm, 0.25, True)
-        K_put = find_strike(S0, T, sigma_atm, -0.25, False)
-        rr = compute_fair_rr(S0, lbl, sigma_atm, -2.0)
-        mk = skew_markup(rr)
-        mp, se = run_cell(-2.0, 400_000)
-        print(f'    {("tenor " + lbl):<34s} recovery={mp/mk:6.4f}  (SE {se/abs(mk):.4f})')
-        reset()
-
+    # ─── Stress B: path-grid granularity ────────────────────────────
+    # Hedge every step; vary the simulation resolution. This is the Euler
+    # discretization bias — the mean converges as the grid refines. (The
+    # earlier "weekly → 0.72" was THIS, a 4-step grid, mislabeled.)
     print()
-    print('  Reading the stress: with continuous hedging recovery → ~0.98 (6x/day');
-    print('  already 0.976); the ~2% residual is the known lognormal-dispersion')
-    print('  bias, NOT risk premium. Coarse hedging leaks the vanna edge (weekly')
-    print('  → 0.72), and short tenors recover a touch less (1W 0.85). So the')
-    print('  translation is sound, but REALIZED capture of the edge is')
-    print('  hedge-frequency dependent — a real-world cost, separate from premium.')
+    print('  STRESS B — vary path-simulation granularity (hedge every step):')
+    print(f'    {"grid steps":<24s}{"recovery":>9s}{"SE":>9s}')
+    for ng in [4, 8, 30, 120, 480]:
+        mp, se = run_cell(beta_s, 400_000, n_grid=ng, hedge_every=1)
+        print(f'    {str(ng) + " steps":<24s}{mp/mk_s:9.4f}{se/abs(mk_s):9.4f}')
+    print('    → converges to ~0.98 from below; the ~2% gap is the genuine')
+    print('      lognormal-dispersion (Jensen) bias, NOT risk premium.')
+
+    # ─── Stress C: across tenors (fine grid) ────────────────────────
+    print()
+    print('  STRESS C — recovery across tenors (β=-2.0, ~4x/day grid):')
+    print(f'    {"tenor":<24s}{"recovery":>9s}{"SE":>9s}')
+    for lbl, ng in [('1W', 28), ('1M', 120), ('3M', 360)]:
+        T_l = tenor_to_T(lbl)
+        Kc_l = find_strike(S0, T_l, sigma_atm, 0.25, True)
+        Kp_l = find_strike(S0, T_l, sigma_atm, -0.25, False)
+        rr_l = compute_fair_rr(S0, lbl, sigma_atm, beta_s)
+        mk_l = skew_markup_T(rr_l, T_l, Kc_l, Kp_l)
+        mp, se = run_cell(beta_s, 400_000, T_=T_l, Kc=Kc_l, Kp=Kp_l,
+                          n_grid=ng, hedge_every=1)
+        print(f'    {lbl:<24s}{mp/mk_l:9.4f}{se/abs(mk_l):9.4f}')
+
     print()
     print('  Risk premium proper lives in the GAP between implied β (this MC, fed')
     print('  by market RR) and realized β (regress dσ on dS/S in the data).')
-    print('  Same logic for ν_log vs realized vol-of-vol.')
+    print('  Same logic for ν_log vs realized vol-of-vol. Recovery > 1 when fed')
+    print('  the MARKET RR ⇒ the RR was cheap vs realized (a buy); < ~0.98 ⇒ rich.')

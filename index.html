@@ -1148,7 +1148,7 @@ function computeBasket() {
     let html = '';
 
     // Currency betas
-    html += '<div class="card"><div class="section-title">Currency Betas (' + tenor + ')</div>';
+    html += '<div class="card" data-bgroup="skew"><div class="section-title">Currency Betas (' + tenor + ')</div>';
     html += '<table class="data-table"><thead><tr>';
     ['Currency','Basket Vol','Beta','Interpretation'].forEach(h => html += `<th>${h}</th>`);
     html += '</tr></thead><tbody>';
@@ -1174,7 +1174,7 @@ function computeBasket() {
     // Pair names are flipped if needed (e.g., GBPAUD → AUDGBP in the AUD section).
     // Shows: pair vol, LHS basket vol, RHS basket vol, %LHS, %RHS, LHS vol contrib, RHS vol contrib, bar
 
-    html += `<div class="card"><div class="section-title">Pair Variance Attribution (${tenor})</div>`;
+    html += `<div class="card" data-bgroup="skew"><div class="section-title">Pair Variance Attribution (${tenor})</div>`;
 
     const vaCcyOrder = [...ccys].sort((a,b) => ccyBetas[a] - ccyBetas[b]);
     vaCcyOrder.forEach(ccy => {
@@ -1276,7 +1276,7 @@ function computeBasket() {
         }
     }
 
-    html += '<div class="card"><div class="section-title">Basket Correlation Matrix (' + tenor + ')</div>';
+    html += '<div class="card" data-bgroup="corr"><div class="section-title">Basket Correlation Matrix (' + tenor + ')</div>';
     html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">N=${Nccy} currencies · Scale factor (N/(N-1))² = ${scaleFactor.toFixed(3)} · ρ = (σ²_A + σ²_B - ${scaleFactor.toFixed(3)}×σ²_pair) / (2σ_Aσ_B)</div>`;
     html += '<table class="data-table"><thead><tr><th></th>';
     ccys.forEach(c => html += `<th>${c}</th>`);
@@ -1372,7 +1372,7 @@ function computeBasket() {
     });
     viewCcy += '</div>';
 
-    html += '<div class="card">';
+    html += '<div class="card" data-bgroup="skew">';
     html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
     html += `<div class="section-title" style="margin:0; border:none; padding:0;">Pair Decomposition (${tenor})</div>`;
     html += '<div class="btn-row" style="margin:0;">';
@@ -1479,7 +1479,7 @@ function computeBasket() {
             });
 
             // Currency ν table
-            html += '<div class="card"><div class="section-title">Currency ν_log — Global + Idiosyncratic Vol-of-Vol (' + tenor + ')</div>';
+            html += '<div class="card" data-bgroup="vov"><div class="section-title">Currency ν_log — Global + Idiosyncratic Vol-of-Vol (' + tenor + ')</div>';
             html += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--cyan); margin-bottom:10px;">`;
             html += `Global vol factor ν_g = ${nuG.toFixed(2)} · carries ${(globalShare*100).toFixed(0)}% of avg pair vol-of-vol variance`;
             html += `<span style="color:var(--text-muted);"> · ν²_pair = ν_g² + w_L²η_L² + w_R²η_R²</span></div>`;
@@ -1543,7 +1543,7 @@ function computeBasket() {
             // Model 1 (BF only, rank-1): ρ = ν_g² / (ν_L · ν_R)
             // ν_L, ν_R are the BF-implied (spot-orthogonal) total vol-of-vols.
             const nuG2 = nuG * nuG;
-            html += '<div class="card"><div class="section-title">Implied Vol-of-Vol Correlation — BF only (' + tenor + ')</div>';
+            html += '<div class="card" data-bgroup="corr"><div class="section-title">Implied Vol-of-Vol Correlation — BF only (' + tenor + ')</div>';
             html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
             html += `ρ_vol = ν_g² / (ν_L·ν_R), ν_g=${nuG.toFixed(2)} · rank-1: every correlation set by the shared global factor · pure-global currencies (η≈0) → ρ→1. This is the correlation of the spot-orthogonal vol shocks the butterfly sees.</div>`;
             html += vovCorrTable((c1, c2) => {
@@ -1555,7 +1555,7 @@ function computeBasket() {
             // Model 2 (full / Part C): adds the leverage channel β_L·β_R·ρ_spot
             //   ρ = (ν_g² + β_L·β_R·ρ_spot) / √[(ν_L²+β_L²)(ν_R²+β_R²)]
             // β = spot-driven vol-of-vol (from RR); ρ_spot from the basket corr matrix.
-            html += '<div class="card"><div class="section-title">Implied Vol-of-Vol Correlation — Full / leverage-adjusted (' + tenor + ')</div>';
+            html += '<div class="card" data-bgroup="corr"><div class="section-title">Implied Vol-of-Vol Correlation — Full / leverage-adjusted (' + tenor + ')</div>';
             html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
             html += `ρ_vol = (ν_g² + β_L·β_R·ρ_spot) / √[(ν_L²+β_L²)(ν_R²+β_R²)] · folds in the spot-correlation channel via the betas (total vol = BF-orthogonal ⊕ spot-driven). Differs from the BF-only matrix only where betas are large.</div>`;
             html += vovCorrTable((c1, c2) => {
@@ -1637,7 +1637,7 @@ function computeBasket() {
                     vovcRows.sort((a, b) => Math.abs(b.signal) - Math.abs(a.signal));
                     const maxSig = Math.max(...vovcRows.map(r => Math.abs(r.signal)), 0.01);
                     const maxV = Math.max(...vovcRows.map(r => Math.max(r.vovcM, Math.abs(r.vovcK))), 0.1);
-                    html += '<div class="card"><div class="section-title">Vol of Implied Correlation (' + tenor + ')</div>';
+                    html += '<div class="card" data-bgroup="vovc"><div class="section-title">Vol of Implied Correlation (' + tenor + ')</div>';
                     html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
                     html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = model − market (positive = cross fly cheap, buy to converge)</div>`;
                     html += '<table class="data-table"><thead><tr>';
@@ -1655,6 +1655,38 @@ function computeBasket() {
                         html += '</tr>';
                     });
                     html += '</tbody></table></div>';
+                }
+
+                // ── Pair × Pair vol-of-vol correlation (full matrix) ──
+                // ρ_vol(i,j) = covLogVol(i,j) / (modelNu_i · modelNu_j)
+                // covLogVol = ν_g² + Σ over shared currencies of w_i·w_j·η²
+                {
+                    const allPairs = pairList.slice().sort((a, b) => {
+                        const au = (a.lhs === 'USD' || a.rhs === 'USD') ? 0 : 1;
+                        const bu = (b.lhs === 'USD' || b.rhs === 'USD') ? 0 : 1;
+                        return au - bu || a.pair.localeCompare(b.pair);
+                    });
+                    const mnuByPair = {};
+                    allPairs.forEach(p => mnuByPair[p.pair] = modelNu(p));
+                    let pm = '<div class="card" data-bgroup="corr"><div class="section-title">Pair × Pair Vol-of-Vol Correlation (' + tenor + ')</div>';
+                    pm += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">ρ_vol(i,j) = Cov(d ln σ_i, d ln σ_j) / (ν_i·ν_j) · Cov = ν_g² + Σ shared-ccy w_i·w_j·η² · USD pairs first, then crosses · always positive (shared global factor)</div>`;
+                    pm += '<div style="overflow-x:auto;"><table class="data-table" style="font-size:10px;"><thead><tr><th></th>';
+                    allPairs.forEach(p => pm += `<th>${p.pair}</th>`);
+                    pm += '</tr></thead><tbody>';
+                    allPairs.forEach(pi => {
+                        pm += `<tr><td style="font-weight:600; color:var(--cyan);">${pi.pair}</td>`;
+                        allPairs.forEach(pj => {
+                            if (pi.pair === pj.pair) { pm += '<td style="color:var(--text-secondary);">1.00</td>'; return; }
+                            const rv = Math.max(-1, Math.min(1, covLogVol(pi, pj) / (mnuByPair[pi.pair] * mnuByPair[pj.pair])));
+                            const inten = Math.min(Math.abs(rv), 1);
+                            const bg = `rgba(74, 222, 128, ${0.05 + inten * 0.25})`;
+                            const fg = `rgb(${Math.round(74 - inten*10)},${Math.round(154 + inten*68)},${Math.round(107 - inten*20)})`;
+                            pm += `<td style="background:${bg}; color:${fg}; font-weight:${inten > 0.5 ? 600 : 400};">${rv.toFixed(2)}</td>`;
+                        });
+                        pm += '</tr>';
+                    });
+                    pm += '</tbody></table></div></div>';
+                    html += pm;
                 }
             }
 
@@ -1730,7 +1762,7 @@ function computeBasket() {
             });
             bfViewCcy += '</div>';
 
-            html += '<div class="card">';
+            html += '<div class="card" data-bgroup="vov">';
             html += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">';
             html += `<div class="section-title" style="margin:0; border:none; padding:0;">BF Decomposition (${tenor})</div>`;
             html += '<div class="btn-row" style="margin:0;">';
@@ -1747,7 +1779,7 @@ function computeBasket() {
                 const bfResMap = {};
                 nuPairs.forEach(p => bfResMap[p.pair] = p.residualBF);
 
-                html += '<div class="card"><div class="section-title">2D Residual: β vs ν (' + tenor + ')</div>';
+                html += '<div class="card" data-bgroup="signals"><div class="section-title">2D Residual: β vs ν (' + tenor + ')</div>';
                 html += '<table class="data-table"><thead><tr>';
                 ['Pair','RR Resid','BF Resid','Quadrant'].forEach(h => html += `<th>${h}</th>`);
                 html += '</tr></thead><tbody>';
@@ -1778,6 +1810,72 @@ function computeBasket() {
     }
 
     document.getElementById('basket-results').innerHTML = html;
+    organizeBasketSubtabs();
+}
+
+// Partition the basket cards (tagged with data-bgroup) into sub-tabs.
+const BASKET_SUBTABS = [
+    { key: 'skew',    label: 'Skew / β' },
+    { key: 'vov',     label: 'Vol-of-Vol / ν' },
+    { key: 'corr',    label: 'Correlations' },
+    { key: 'vovc',    label: 'Vol-of-Corr' },
+    { key: 'signals', label: 'Signals' },
+];
+
+function organizeBasketSubtabs() {
+    const root = document.getElementById('basket-results');
+    if (!root) return;
+    const cards = [...root.querySelectorAll('.card[data-bgroup]')];
+    if (!cards.length) return;  // nothing tagged (e.g. error message) → leave as-is
+
+    const nav = document.createElement('div');
+    nav.className = 'btn-row';
+    nav.style.cssText = 'margin-bottom:14px; flex-wrap:wrap;';
+
+    const containers = {};
+    BASKET_SUBTABS.forEach(g => {
+        const c = document.createElement('div');
+        c.id = 'bsub-' + g.key;
+        c.style.display = 'none';
+        containers[g.key] = c;
+    });
+
+    // move each card into its group container (preserves nodes + handlers)
+    cards.forEach(card => {
+        const g = card.getAttribute('data-bgroup');
+        (containers[g] || containers.skew).appendChild(card);
+    });
+
+    root.innerHTML = '';
+    root.appendChild(nav);
+
+    let firstKey = null;
+    BASKET_SUBTABS.forEach(g => {
+        if (!containers[g.key].children.length) return;  // skip empty groups
+        if (!firstKey) firstKey = g.key;
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.id = 'bsubbtn-' + g.key;
+        btn.textContent = g.label;
+        btn.style.cssText = 'font-size:10px; padding:5px 12px;';
+        btn.onclick = () => showBasketSub(g.key);
+        nav.appendChild(btn);
+        root.appendChild(containers[g.key]);
+    });
+
+    if (firstKey) showBasketSub(firstKey);
+}
+
+function showBasketSub(key) {
+    BASKET_SUBTABS.forEach(g => {
+        const panel = document.getElementById('bsub-' + g.key);
+        const btn = document.getElementById('bsubbtn-' + g.key);
+        if (panel) panel.style.display = (g.key === key) ? 'block' : 'none';
+        if (btn) {
+            btn.style.background = (g.key === key) ? 'var(--cyan)' : 'transparent';
+            btn.style.color = (g.key === key) ? '#000' : 'var(--cyan)';
+        }
+    });
 }
 
 function toggleVAView(view) {

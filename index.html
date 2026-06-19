@@ -1577,14 +1577,15 @@ function computeBasket() {
             // model → fitted ν; market → each pair's own observed ν.
             {
                 const nuG2vc = nuG * nuG;
-                const piByPair = {};
-                pairList.forEach(p => { piByPair[p.pair] = p; });
+                // Canonical currency order → groups crosses by bloc (all AUD*
+                // together, all EUR* together, …). Unknown ccys sort last.
+                const CCY_RANK = {EUR:1, GBP:2, AUD:3, NZD:4, USD:5, CAD:6, CHF:7, JPY:8, CNH:9};
+                const rk = c => CCY_RANK[c] != null ? CCY_RANK[c] : 99;
+
                 const modelNu = p => {
                     const eL = ccyEta[p.lhs] || 0, eR = ccyEta[p.rhs] || 0;
                     return Math.sqrt(nuG2vc + p.wL*p.wL*eL*eL + p.wR*p.wR*eR*eR);
                 };
-                const findLeg = ccy => pairList.find(p =>
-                    (p.lhs === ccy && p.rhs === 'USD') || (p.lhs === 'USD' && p.rhs === ccy));
                 const covLogVol = (pa, pb) => {
                     let cov = nuG2vc;  // shared global factor
                     const wa = {[pa.lhs]: pa.wL, [pa.rhs]: pa.wR};
@@ -1595,14 +1596,40 @@ function computeBasket() {
                     return cov;
                 };
 
-                const vovcRows = [];
-                pairList.forEach(p => {
-                    if (p.lhs === 'USD' || p.rhs === 'USD') return;       // crosses only
-                    const legX = findLeg(p.lhs), legY = findLeg(p.rhs);
-                    if (!legX || !legY) return;
-                    if (p.obsNu == null || legX.obsNu == null || legY.obsNu == null) return;
+                // Build info from ANY entered pair (not just RR/BF-complete ones).
+                // ρ and the model VoVC need only ATM vols + the fitted ν, so we
+                // show every cross whose two USD legs are quoted and whose
+                // currencies are in the fit; the market column is blanked (—)
+                // when a BF is missing instead of dropping the whole row.
+                const pairKeys = Object.keys(pairs);
+                const buildInfo = (pairStr) => {
+                    const d = pairs[pairStr];
+                    if (!d || d.vol == null) return null;
+                    const lhs = pairStr.slice(0,3), rhs = pairStr.slice(3,6);
+                    if (!(basketVols[lhs] > 0) || !(basketVols[rhs] > 0)) return null; // ccy not in fit
+                    const [wL, wR] = pairWeights(pairStr);
+                    const obsNu = (d.bf != null && d.bf > 0)
+                        ? impliedNuLog(d.bf, d.vol, tenorToT(tenor)) : null;
+                    return { pair: pairStr, lhs, rhs, vol: d.vol, wL, wR, obsNu };
+                };
+                const findLegInfo = (ccy) => {
+                    const k = pairKeys.find(k => {
+                        const a = k.slice(0,3), b = k.slice(3,6);
+                        return (a === ccy && b === 'USD') || (a === 'USD' && b === ccy);
+                    });
+                    return k ? buildInfo(k) : null;
+                };
 
-                    const sX = legX.vol, sY = legY.vol, sC = p.vol;
+                const vovcRows = [];
+                pairKeys.forEach(crossKey => {
+                    const xc = crossKey.slice(0,3), yc = crossKey.slice(3,6);
+                    if (xc === 'USD' || yc === 'USD') return;          // crosses only
+                    const cInfo = buildInfo(crossKey);
+                    if (!cInfo) return;                                 // cross ATM missing / ccy not in fit
+                    const legX = findLegInfo(xc), legY = findLegInfo(yc);
+                    if (!legX || !legY) return;                         // need both USD legs quoted
+
+                    const sX = legX.vol, sY = legY.vol, sC = cInfo.vol;
                     let rho = (sX*sX + sY*sY - sC*sC) / (2*sX*sY);
                     rho = Math.max(-0.999, Math.min(0.999, rho));
 
@@ -1611,10 +1638,9 @@ function computeBasket() {
                         (sY*sY - sX*sX + sC*sC) / (2*sY*sY*sX),  // ∂ρ/∂σ_Y
                         -sC / (sX*sY),                            // ∂ρ/∂σ_C
                     ];
-                    const order = [legX, legY, p];
+                    const order = [legX, legY, cInfo];
                     const sig = [sX, sY, sC];
                     const mnu = order.map(modelNu);
-                    const onu = [legX.obsNu, legY.obsNu, p.obsNu];
                     const rhoVol = (i, j) => i === j ? 1
                         : covLogVol(order[i], order[j]) / (mnu[i] * mnu[j]);
                     const varDrho = nuArr => {
@@ -1623,23 +1649,46 @@ function computeBasket() {
                             t += grad[i]*grad[j]*sig[i]*sig[j]*nuArr[i]*nuArr[j]*rhoVol(i, j);
                         return t;
                     };
-                    const vm = varDrho(mnu), vk = varDrho(onu);
+
+                    const vm = varDrho(mnu);
                     const vovcM = vm > 0 ? Math.sqrt(vm) : 0;
-                    const vovcK = vk > 0 ? Math.sqrt(vk) : -Math.sqrt(-vk);
+
+                    // Market side only when all three pairs have a BF.
+                    let vovcK = null, dailyK = null, signal = null, missing = '';
+                    if (legX.obsNu != null && legY.obsNu != null && cInfo.obsNu != null) {
+                        const vk = varDrho([legX.obsNu, legY.obsNu, cInfo.obsNu]);
+                        vovcK = vk > 0 ? Math.sqrt(vk) : -Math.sqrt(-vk);
+                        dailyK = vovcK / Math.sqrt(252);
+                        signal = vovcM - vovcK;
+                    } else {
+                        const m = [];
+                        if (cInfo.obsNu == null) m.push(crossKey);
+                        if (legX.obsNu == null) m.push(legX.pair);
+                        if (legY.obsNu == null) m.push(legY.pair);
+                        missing = 'no BF: ' + m.join(', ');
+                    }
                     vovcRows.push({
-                        cross: p.pair, legs: legX.pair + '/' + legY.pair, rho,
-                        vovcM, vovcK, dailyK: vovcK / Math.sqrt(252),
-                        signal: vovcM - vovcK,
+                        cross: crossKey, lhs: xc, rhs: yc,
+                        legs: legX.pair + '/' + legY.pair, rho,
+                        vovcM, vovcK, dailyK, signal, missing,
                     });
                 });
 
                 if (vovcRows.length) {
-                    vovcRows.sort((a, b) => Math.abs(b.signal) - Math.abs(a.signal));
-                    const maxSig = Math.max(...vovcRows.map(r => Math.abs(r.signal)), 0.01);
-                    const maxV = Math.max(...vovcRows.map(r => Math.max(r.vovcM, Math.abs(r.vovcK))), 0.1);
+                    // Sort by currency bloc (canonical order), so each base ccy clusters.
+                    vovcRows.sort((a, b) => {
+                        const ak = [rk(a.lhs), rk(a.rhs)].sort((x, y) => x - y);
+                        const bk = [rk(b.lhs), rk(b.rhs)].sort((x, y) => x - y);
+                        return ak[0] - bk[0] || ak[1] - bk[1] || a.cross.localeCompare(b.cross);
+                    });
+                    const sigs = vovcRows.map(r => r.signal).filter(s => s != null).map(Math.abs);
+                    const maxSig = Math.max(...sigs, 0.01);
+                    const maxV = Math.max(...vovcRows.map(r =>
+                        Math.max(r.vovcM, r.vovcK != null ? Math.abs(r.vovcK) : 0)), 0.1);
+                    const nMkt = sigs.length;
                     html += '<div class="card"><div class="section-title">Vol of Implied Correlation (' + tenor + ')</div>';
                     html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
-                    html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = model − market (positive = cross fly cheap, buy to converge)</div>`;
+                    html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = model − market (positive = cross fly cheap, buy to converge) · sorted by currency bloc · ${vovcRows.length} crosses, ${nMkt} with a market read (— = a leg/cross BF is blank)</div>`;
                     html += '<table class="data-table"><thead><tr>';
                     ['Cross','Legs','ρ impl','VoVC model','VoVC mkt','Daily mkt','Signal'].forEach(h => html += `<th>${h}</th>`);
                     html += '</tr></thead><tbody>';
@@ -1649,9 +1698,16 @@ function computeBasket() {
                         html += `<td style="color:var(--text-secondary); font-size:10px;">${r.legs}</td>`;
                         html += `<td>${r.rho.toFixed(3)}</td>`;
                         html += td(r.vovcM.toFixed(3), true, maxV);
-                        html += td(r.vovcK.toFixed(3), true, maxV);
-                        html += `<td>${r.dailyK.toFixed(4)}</td>`;
-                        html += td(fmtSigned(r.signal, 3), true, maxSig);
+                        if (r.vovcK == null) {
+                            const tip = r.missing ? ` title="${r.missing}"` : '';
+                            html += `<td style="color:var(--text-muted);"${tip}>—</td>`;
+                            html += `<td style="color:var(--text-muted);">—</td>`;
+                            html += `<td style="color:var(--text-muted);"${tip}>—</td>`;
+                        } else {
+                            html += td(r.vovcK.toFixed(3), true, maxV);
+                            html += `<td>${r.dailyK.toFixed(4)}</td>`;
+                            html += td(fmtSigned(r.signal, 3), true, maxSig);
+                        }
                         html += '</tr>';
                     });
                     html += '</tbody></table></div>';

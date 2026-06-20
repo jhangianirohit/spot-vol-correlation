@@ -1650,16 +1650,40 @@ function computeBasket() {
                         return t;
                     };
 
+                    // Hessian of ρ in (σ_X, σ_Y, σ_C): the convexity a correlation
+                    // swap carries that a variance-swap hedge can't flatten.
+                    const a = sX, b = sY, c = sC;
+                    const H = [
+                        [ (b*b - c*c)/(a*a*a*b),       -(a*a+b*b+c*c)/(2*a*a*b*b),  c/(a*a*b) ],
+                        [ -(a*a+b*b+c*c)/(2*a*a*b*b),   (a*a - c*c)/(a*b*b*b),      c/(a*b*b) ],
+                        [ c/(a*a*b),                    c/(a*b*b),                  -1/(a*b)  ],
+                    ];
+                    const Tc = tenorToT(tenor) || 0;
+                    // CA = ½·T·Σ H_ij σ_iν_i σ_jν_j ρ_vol(i,j) — terminal convexity
+                    // drift of ρ. Off-diagonal ρ_vol is ν_g-driven (the key assumption).
+                    const convAdj = nuArr => {
+                        let t = 0;
+                        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+                            t += H[i][j]*sig[i]*sig[j]*nuArr[i]*nuArr[j]*rhoVol(i, j);
+                        return 0.5 * Tc * t;
+                    };
+
                     const vm = varDrho(mnu);
                     const vovcM = vm > 0 ? Math.sqrt(vm) : 0;
+                    const caM = convAdj(mnu);        // model convexity adj (corr units)
+                    const kModel = rho + caM;        // model fair corr-swap strike (terminal)
 
                     // Market side only when all three pairs have a BF.
                     let vovcK = null, dailyK = null, signal = null, missing = '';
+                    let caK = null, kMkt = null;
                     if (legX.obsNu != null && legY.obsNu != null && cInfo.obsNu != null) {
-                        const vk = varDrho([legX.obsNu, legY.obsNu, cInfo.obsNu]);
+                        const onu = [legX.obsNu, legY.obsNu, cInfo.obsNu];
+                        const vk = varDrho(onu);
                         vovcK = vk > 0 ? Math.sqrt(vk) : -Math.sqrt(-vk);
                         dailyK = vovcK / Math.sqrt(252);
                         signal = vovcM - vovcK;
+                        caK = convAdj(onu);          // market convexity adj (diagonal uses observed ν)
+                        kMkt = rho + caK;
                     } else {
                         const m = [];
                         if (cInfo.obsNu == null) m.push(crossKey);
@@ -1671,6 +1695,7 @@ function computeBasket() {
                         cross: crossKey, lhs: xc, rhs: yc,
                         legs: legX.pair + '/' + legY.pair, rho,
                         vovcM, vovcK, dailyK, signal, missing,
+                        caM, kModel, caK, kMkt,
                     });
                 });
 
@@ -1685,29 +1710,39 @@ function computeBasket() {
                     const maxSig = Math.max(...sigs, 0.01);
                     const maxV = Math.max(...vovcRows.map(r =>
                         Math.max(r.vovcM, r.vovcK != null ? Math.abs(r.vovcK) : 0)), 0.1);
+                    const maxCvx = Math.max(...vovcRows.map(r =>
+                        Math.max(Math.abs(r.caM), r.caK != null ? Math.abs(r.caK) : 0)), 0.01);
                     const nMkt = sigs.length;
-                    html += '<div class="card"><div class="section-title">Vol of Implied Correlation (' + tenor + ')</div>';
+                    html += '<div class="card"><div class="section-title">Vol of Implied Correlation &amp; Corr-Swap Strike (' + tenor + ')</div>';
                     html += `<div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">`;
-                    html += `ρ = corr of the two legs' USD-values · VoVC = annualized stdev of that correlation (daily ≈ /16) · model uses fitted ν, market uses each pair's own BF · signal = model − market (positive = cross fly cheap, buy to converge) · sorted by currency bloc · ${vovcRows.length} crosses, ${nMkt} with a market read (— = a leg/cross BF is blank)</div>`;
+                    html += `ρ impl = static triangle correlation · VoVC = annualized stdev of ρ (model − market = Signal; +ve ⇒ cross fly cheap) · `;
+                    html += `<b>Cvx</b> = Hessian convexity adjustment over ${tenor} (terminal; for average-style realized ρ use ≈ Cvx/2) · `;
+                    html += `<b>Fair K</b> = ρ impl + Cvx = fair correlation-swap strike · market uses each pair's own BF-ν, model uses fitted ν · `;
+                    html += `<b>both depend on ν_g via the off-diagonal ρ_vol</b> (cross-pair vol comovement, not observable) — treat the Signal as more robust than the absolute Cvx · `;
+                    html += `* = model-ν fallback (a BF is blank) · sorted by currency bloc · ${vovcRows.length} crosses, ${nMkt} with a market read</div>`;
                     html += '<table class="data-table"><thead><tr>';
-                    ['Cross','Legs','ρ impl','VoVC model','VoVC mkt','Daily mkt','Signal'].forEach(h => html += `<th>${h}</th>`);
+                    ['Cross','Legs','ρ impl','VoVC mkt','Signal','Cvx','Fair K'].forEach(h => html += `<th>${h}</th>`);
                     html += '</tr></thead><tbody>';
                     vovcRows.forEach(r => {
+                        const caShown = r.caK != null ? r.caK : r.caM;
+                        const kShown = r.kMkt != null ? r.kMkt : r.kModel;
+                        const star = r.caK == null ? '*' : '';
+                        const cvxTip = `model Cvx ${r.caM.toFixed(4)}${r.caK != null ? '; market Cvx ' + r.caK.toFixed(4) : ''} · ν_g-dependent via off-diagonal`;
+                        const kTip = `ρ impl ${r.rho.toFixed(3)} + Cvx · model K ${r.kModel.toFixed(3)}${r.kMkt != null ? '; market K ' + r.kMkt.toFixed(3) : ''}`;
                         html += '<tr>';
                         html += `<td>${r.cross}</td>`;
                         html += `<td style="color:var(--text-secondary); font-size:10px;">${r.legs}</td>`;
                         html += `<td>${r.rho.toFixed(3)}</td>`;
-                        html += td(r.vovcM.toFixed(3), true, maxV);
                         if (r.vovcK == null) {
                             const tip = r.missing ? ` title="${r.missing}"` : '';
                             html += `<td style="color:var(--text-muted);"${tip}>—</td>`;
-                            html += `<td style="color:var(--text-muted);">—</td>`;
                             html += `<td style="color:var(--text-muted);"${tip}>—</td>`;
                         } else {
                             html += td(r.vovcK.toFixed(3), true, maxV);
-                            html += `<td>${r.dailyK.toFixed(4)}</td>`;
                             html += td(fmtSigned(r.signal, 3), true, maxSig);
                         }
+                        html += `<td style="${intensityColor(caShown, maxCvx)}" title="${cvxTip}">${fmtSigned(caShown, 3)}${star}</td>`;
+                        html += `<td title="${kTip}">${kShown.toFixed(3)}${star}</td>`;
                         html += '</tr>';
                     });
                     html += '</tbody></table></div>';

@@ -397,6 +397,10 @@ EURGBP	3M	5.00	-0.15</textarea>
                         <label>Tenor</label>
                         <input id="basket-tenor" value="1M" style="width:80px;">
                     </div>
+                    <div class="input-group">
+                        <label>ν_g override</label>
+                        <input id="basket-nug" value="" placeholder="auto" style="width:90px;">
+                    </div>
                 </div>
                 <textarea id="basket-data" class="data-input" rows="22">EURUSD	7.53	-1.03	0.18
 USDJPY	8.81	-0.46	0.24
@@ -1007,6 +1011,10 @@ let lastBasketResults = null;
 function computeBasket() {
     const tenor = document.getElementById('basket-tenor').value.trim().toUpperCase();
     const text = document.getElementById('basket-data').value;
+    // Optional manual global vol factor. Blank = auto (max-ν_g on BF plateau).
+    // Set this to the desk's realized cross-pair correlation of implied vols.
+    const nugEl = document.getElementById('basket-nug');
+    const nugOverride = nugEl ? parseFloat(nugEl.value) : NaN;
 
     // Parse: pair vol rr [bf]
     const pairs = {};
@@ -1452,12 +1460,22 @@ function computeBasket() {
                 const eta2 = nnlsSolve(nu_rows, b);
                 scan.push({ nuG, eta2, rmse: bfRmseFor(nuG * nuG, eta2) });
             }
-            const rmseMin = Math.min(...scan.map(s => s.rmse));
-            // max-ν_g point on the plateau (within 2% of min RMSE)
-            const best = scan.filter(s => s.rmse <= rmseMin * 1.02).pop();
-            const nuG = best.nuG;
-            const eta2 = best.eta2;
-            const bfRmseModel = best.rmse;
+            let nuG, eta2, bfRmseModel;
+            if (!isNaN(nugOverride) && nugOverride >= 0) {
+                // Manual ν_g: fix the global factor, re-solve idio η² (NNLS) to
+                // still hit the BF diagonal as well as possible. BF RMSE below
+                // shows the cost of forcing this ν_g.
+                nuG = nugOverride;
+                eta2 = nnlsSolve(nu_rows, nu_b.map(v => v - nuG * nuG));
+                bfRmseModel = bfRmseFor(nuG * nuG, eta2);
+            } else {
+                const rmseMin = Math.min(...scan.map(s => s.rmse));
+                // max-ν_g point on the plateau (within 2% of min RMSE)
+                const best = scan.filter(s => s.rmse <= rmseMin * 1.02).pop();
+                nuG = best.nuG;
+                eta2 = best.eta2;
+                bfRmseModel = best.rmse;
+            }
 
             const ccyEta = {};
             const ccyNu = {};   // TOTAL ν per currency = √(ν_g² + η²)
@@ -1467,6 +1485,17 @@ function computeBasket() {
             });
             const avgObsNu2 = nu_b.reduce((s,v) => s + v, 0) / nu_b.length;
             const globalShare = nuG * nuG / avgObsNu2;
+
+            // Average implied cross-pair vol-of-vol correlation (BF-only, currency
+            // level): ρ_vol(c1,c2) = ν_g² / (ν_c1·ν_c2). Mean off-diagonal — the
+            // single number to calibrate against the desk's REALIZED correlation
+            // of implied vols. If this prints high vs realized, ν_g is too high.
+            let rvSum = 0, rvN = 0;
+            for (let i = 0; i < ccys.length; i++) for (let j = i + 1; j < ccys.length; j++) {
+                const d = ccyNu[ccys[i]] * ccyNu[ccys[j]];
+                if (d > 0) { rvSum += (nuG * nuG) / d; rvN++; }
+            }
+            const avgRhoVol = rvN ? rvSum / rvN : 0;
 
             // Predicted ν and BF for each pair
             nuPairs.forEach(p => {
@@ -1481,7 +1510,7 @@ function computeBasket() {
             // Currency ν table
             html += '<div class="card"><div class="section-title">Currency ν_log — Global + Idiosyncratic Vol-of-Vol (' + tenor + ')</div>';
             html += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--cyan); margin-bottom:10px;">`;
-            html += `Global vol factor ν_g = ${nuG.toFixed(2)} · carries ${(globalShare*100).toFixed(0)}% of avg pair vol-of-vol variance`;
+            html += `Global vol factor ν_g = ${nuG.toFixed(2)}${(!isNaN(nugOverride) && nugOverride >= 0) ? ' (manual)' : ' (auto: max-ν_g on BF plateau)'} · carries ${(globalShare*100).toFixed(0)}% of avg pair vol-of-vol variance · implies avg cross-pair ρ_vol ≈ ${avgRhoVol.toFixed(2)} → compare to desk realized corr of implied vols (BF RMSE ${bfRmseModel.toFixed(4)})`;
             html += `<span style="color:var(--text-muted);"> · ν²_pair = ν_g² + w_L²η_L² + w_R²η_R²</span></div>`;
             html += '<table class="data-table"><thead><tr>';
             ['Currency','Basket Vol','η (idio)','ν total','Daily σ move','Interpretation'].forEach(h => html += `<th>${h}</th>`);
